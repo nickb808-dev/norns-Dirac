@@ -26,6 +26,27 @@ local OPTIONS = {
 
 -- The on-screen list: every control, then every option. Built from the same
 -- tables the params menu is built from, so the two cannot drift.
+
+-- Calling engine.<id>(x) directly kills init() if the engine is not loaded:
+-- params:bang() fires all 32 actions at once, the first nil index raises, and
+-- norns then shows "error: init" on EVERY BOOT because it autoloads the last
+-- script. A script should not be able to brick its own start-up because an
+-- engine is missing.
+--
+-- So: send if we can, note it if we cannot, and keep going. The params menu
+-- still works, the UI still draws, and the reason is on screen instead of
+-- being a dead device.
+local engine_ok = true
+
+local function send(id, value)
+  local f = engine[id]
+  if type(f) == "function" then
+    f(value)
+  else
+    engine_ok = false
+  end
+end
+
 local LIST = {}
 local sel = 1
 local dirty = true
@@ -42,7 +63,7 @@ function init()
       p.id, p.name,
       controlspec.new(p.min, p.max, p.warp or "lin", step, p.default, p.unit or ""))
     params:set_action(p.id, function(x)
-      engine[p.id](x)
+      send(p.id, x)
       dirty = true
     end)
     table.insert(LIST, { id = p.id, name = p.name, kind = "control" })
@@ -51,7 +72,7 @@ function init()
   for _, o in ipairs(OPTIONS) do
     params:add_option(o.id, o.name, o.choices, o.default)
     params:set_action(o.id, function(i)
-      engine[o.id](i)
+      send(o.id, i)
       dirty = true
     end)
     table.insert(LIST, { id = o.id, name = o.name, kind = "option" })
@@ -117,6 +138,11 @@ function redraw()
   screen.level(1)
   screen.move(0, 63)
   screen.text(sel .. "/" .. #LIST)
+  if not engine_ok then
+    screen.level(15)
+    screen.move(127, 63)
+    screen.text_right("NO ENGINE")
+  end
   screen.update()
 end
 
