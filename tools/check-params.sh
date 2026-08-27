@@ -26,11 +26,11 @@ lua_ids=$( { grep -oP '^\s*\{\s*id\s*=\s*"\K[a-zA-Z]+' lib/params.lua
 
 # addCommand names come from the two symbol lists, not from a literal string,
 # so extract the symbols inside the two .do { } blocks.
-sc_cmds=$(sed -n '/one command per parameter/,/^	}/p' lib/Engine_Dirac.sc \
+sc_cmds=$(sed -n '/One command per parameter/,/^	}/p' lib/Engine_Dirac.sc \
           | grep -oP '\\\K[a-zA-Z]+' | sort -u)
 
 # SynthDef arguments: everything between `arg` and the closing `;`.
-sc_args=$(sed -n '/SynthDef(\\dirac/,/^			    playheadsOpt/p' lib/Engine_Dirac.sc \
+sc_args=$(sed -n '/SynthDef(\\dirac/,/playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;/p' lib/Engine_Dirac.sc \
           | grep -oP '(?<![a-zA-Z\\])\b[a-zA-Z][a-zA-Z0-9]*(?=\s*=)' | sort -u)
 
 emptycheck() {

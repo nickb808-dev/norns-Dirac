@@ -1,13 +1,25 @@
 // Engine_Dirac.sc - the norns engine wrapper around the Dirac UGen.
 //
-// One long-lived synth, one addCommand per parameter. Deliberately thin: it
-// owns no DSP and no musical decisions, so the only way it can be wrong is by
-// naming or routing something incorrectly, and both are checkable.
+// Structured after Engine_Pappus, which is a working engine on this same
+// machine, rather than after my assumptions. Two things that cost a whole
+// evening, both of which Pappus already knew:
 //
-// The command names here MUST match lib/params.lua's `id` fields, because
-// dirac.lua calls engine.<id>(value) by name and a missing command is a silent
-// no-op - the param moves in the menu and nothing happens. tools/check-params.sh
-// compares the two lists.
+// 1. AN UNCAUGHT ERROR IN alloc HANGS THE SCRIPT SILENTLY.
+//    alloc runs inside a Routine and doneCallback only fires when it returns.
+//    Throw, and matron's engine table stays empty, the script sits on
+//    "loading..." forever, and NOTHING appears in maiden, journalctl, the
+//    matron log or the crone log. That is why six separate log queries found
+//    nothing at all. Hence the try/catch below: an error here must be visible.
+//
+// 2. context.in_b IS AN ARRAY OF BUSES, ONE PER CHANNEL.
+//    context.out_b is a single bus and responds to .index; context.in_b does
+//    not - it is indexed per channel first, context.in_b[0].index. Writing
+//    context.in_b.index throws doesNotUnderstand, which (see 1) is invisible.
+//    That was the bug.
+//
+// Command names MUST match lib/params.lua's `id` fields: dirac.lua calls
+// engine.<id>(value) by name and a missing command is a silent no-op.
+// tools/check-params.sh compares the lists.
 Engine_Dirac : CroneEngine {
 
 	var <synth;
@@ -17,8 +29,20 @@ Engine_Dirac : CroneEngine {
 	}
 
 	alloc {
+		try {
+			this.prAlloc;
+			"Engine_Dirac: loaded".postln;
+		} { arg err;
+			"### Engine_Dirac: alloc failed ###".postln;
+			err.reportError;
+		};
+	}
+
+	prAlloc {
+		var srv = context.server;
+
 		SynthDef(\dirac, {
-			arg out = 0, in = 0,
+			arg inbusl = 0, inbusr = 1, outbus = 0,
 			    playhead = 0.0, speed = 0.0, rate = 3.0, grains = 12, grainlen = 0.05,
 			    posjtr = 0.0, revprob = 0.0, semishift = 0, voct = 0.0, psprd = 0.0,
 			    scale = 0, window = 0, texture = 0.5, tilt = 0.0, tiltspread = 0.0,
@@ -27,40 +51,37 @@ Engine_Dirac : CroneEngine {
 			    mix = 1.0, feedback = 0.0, level = 0.7, fire = 0.0, hold = 0.0,
 			    playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;
 
-			// The engine's input is MONO - one od::Inlet. norns hands us a
-			// stereo pair, so sum and halve rather than silently dropping the
-			// right channel. Halving keeps a centred mono source at unity
-			// instead of 6 dB hot into the capture ring, which matters because
-			// the ring feeds the feedback path.
-			var src = (In.ar(in, 2).sum) * 0.5;
+			// The engine's input is MONO - one od::Inlet. Sum the pair and halve
+			// rather than dropping the right channel: halving keeps a centred
+			// mono source at unity instead of 6 dB hot into the capture ring,
+			// which feeds the feedback path.
+			var src = (In.ar(inbusl, 1) + In.ar(inbusr, 1)) * 0.5;
 
-			// Fire is one of the two inlets the engine reads per SAMPLE. Passing
-			// it at audio rate means a gate lands on the sample it was sent on,
-			// rather than being quantised to the block. K2Aization is explicit
-			// so the intent is visible at the call site.
+			// Fire is one of only two inlets the engine reads PER SAMPLE, so
+			// expand it explicitly. The wrapper would fan out a control-rate
+			// value anyway; doing it here means a gate lands on the sample it
+			// was sent on rather than at a block boundary.
 			var fireAr = K2A.ar(fire);
 
-			var sig = Dirac.ar(src,
+			Out.ar(outbus, Dirac.ar(src,
 				playhead, rate, posjtr, spread, detune, level, revprob, psprd,
 				texture, grains, fireAr, hold, semishift, grainlen, mix, feedback,
 				compress, binaural, scale, voct, speed, heads, headspread,
 				headtune, snap, color, tilt, tiltspread, window,
-				playheadsOpt, diffuseOpt, freezeOpt);
-
-			Out.ar(out, sig);
+				playheadsOpt, diffuseOpt, freezeOpt));
 		}).add;
 
-		context.server.sync;
+		srv.sync;
 
 		synth = Synth.new(\dirac, [
-			\out, context.out_b.index,
-			\in,  context.in_b.index
-		], context.xg);
+			\inbusl, context.in_b[0].index,
+			\inbusr, context.in_b[1].index,
+			\outbus, context.out_b.index
+		], context.xg, \addToTail);
 
-		// ?? one command per parameter ????????????????????????????????????????
-		// Written out rather than generated from a list, because SuperCollider
-		// has no access to lib/params.lua. The check script is what keeps them
-		// in step; see tools/check-params.sh.
+		// One command per parameter. A list rather than 32 near-identical
+		// blocks; tools/check-params.sh reads these symbols and compares them
+		// against lib/params.lua.
 		[
 			\playhead, \speed, \rate, \grains, \grainlen, \posjtr, \revprob,
 			\semishift, \voct, \psprd, \scale, \window, \texture, \tilt,
@@ -71,9 +92,9 @@ Engine_Dirac : CroneEngine {
 			this.addCommand(name, "f", { |msg| synth.set(name, msg[1]); });
 		};
 
-		// Menu options arrive as ints. They are 1-BASED to match
-		// od::OptionControl on the device - the engine compares against literal
-		// 1/2/3, so sending 0 would silently select nothing.
+		// Menu options arrive as ints, 1-BASED to match od::OptionControl on the
+		// device - the engine compares against literal 1/2/3, so 0 selects
+		// nothing at all.
 		[\playheadsOpt, \diffuseOpt, \freezeOpt].do { |name|
 			this.addCommand(name, "i", { |msg| synth.set(name, msg[1]); });
 		};
