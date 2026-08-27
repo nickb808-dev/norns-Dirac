@@ -15,8 +15,18 @@ HOSTINC      := -Itest/host -Iengine
 NORNSINC     := -Inorns -Iengine
 CXXFLAGS     := -std=c++17 -O2 -ffast-math -Wall -Wno-unused-parameter
 
-.PHONY: all check hosttest shimtest verify-vendor reference ugentest portcheck clean help
+.PHONY: all check hosttest shimtest verify-vendor reference ugentest luacheck paramcheck portcheck clean help
 all: help
+
+# ── the Lua and glue-layer gates ─────────────────────────────────────────────
+# Lua has no compiler and SuperCollider has no link step, so nothing else in
+# the toolchain notices a dropped parameter or an unclosed function until the
+# norns tries to run it. These make both checkable here.
+luacheck:
+	@bash tools/check-lua.sh
+
+paramcheck:
+	@bash tools/check-params.sh
 
 # ── the UGen wrapper, run off-device ─────────────────────────────────────────
 # Drives DiracUGen.cpp through a stub scsynth (test/scstub/) and compares its
@@ -24,9 +34,9 @@ all: help
 # machine, so the only thing that can differ is the WIRING — which is all the
 # wrapper is.
 #
-# The per-inlet case is the valuable one: it checks each of the 28 control
-# inlets ALONE, so a map with two entries transposed cannot pass by having the
-# errors cancel in aggregate.
+# The per-inlet case is the valuable one: it checks each control inlet ALONE,
+# against a full-signal baseline, and reports any inlet that changes no sample
+# as INERT rather than counting it as verified.
 ugentest:
 	@bash tools/check-ugen-names.sh
 	@mkdir -p build
@@ -129,7 +139,7 @@ reference64: hosttest64
 	  exit 1; \
 	fi
 
-check: verify-vendor shimtest hosttest reference hosttest64 reference64 ugentest
+check: verify-vendor shimtest hosttest reference hosttest64 reference64 ugentest luacheck paramcheck
 
 # ── run this ON THE PI ────────────────────────────────────────────────────────
 # Everything in `check` except verify-vendor, which needs an upstream ER-301
@@ -162,8 +172,8 @@ clean:
 	rm -rf build
 
 help:
-	@echo "norns-dirac $(VERSION) — Phase 1 (UGen written, not yet built on target)"
-	@echo "  make check           all seven gates (off-device)"
+	@echo "norns-dirac $(VERSION) — Phase 2 (engine + params; no custom UI yet)"
+	@echo "  make check           all nine gates (off-device)"
 	@echo "  make hosttest        the ported ER-301 harness at FRAMELENGTH=128"
 	@echo "  make hosttest64      the same harness at 64 — what norns runs"
 	@echo "  make shimtest        compile the engine against norns/od/"
@@ -171,5 +181,7 @@ help:
 	@echo "  make reference       diff vs the canonical 128 render (ER-301 parity)"
 	@echo "  make reference64     diff vs the canonical 64 render (norns target)"
 	@echo "  make ugentest        name/order gates + drive the UGen through a stub scsynth"
+	@echo "  make luacheck        parse every .lua (no compiler otherwise)"
+	@echo "  make paramcheck      params.lua = addCommand = SynthDef arg"
 	@echo "  make portcheck       RUN THIS ON THE PI — the ARM float question,"
 	@echo "                       with no SuperCollider involved"

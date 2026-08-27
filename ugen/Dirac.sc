@@ -9,13 +9,18 @@
 // the module does at startup rather than like silence or a wall of noise.
 Dirac : MultiOutUGen {
 
+	// Defaults are the ER-301 dials' OWN initial biases, taken from
+	// dirac/assets/Dirac.lua. Written from memory the first time, nine of them
+	// were wrong — rate 2 (is 3), level 0.8 (0.7), grains 8 (12), grainLen 0.08
+	// (0.05), spread 0 (0.5), texture 0 (0.5), tilt 0.5 (0.0, and the range is
+	// -1..1 not 0..1), speed 1.0 (0.0, where 0 means PARKED), heads max 16 (4).
 	*ar { arg in = 0.0,
-		playhead = 0.0, rate = 2.0, posJtr = 0.0, spread = 0.0, detune = 0.0,
-		level = 0.8, revProb = 0.0, psprd = 0.0, texture = 0.0, grains = 8.0,
-		fire = 0.0, hold = 0.0, semiShift = 0.0, grainLen = 0.08, mix = 1.0,
+		playhead = 0.0, rate = 3.0, posJtr = 0.0, spread = 0.5, detune = 0.0,
+		level = 0.7, revProb = 0.0, psprd = 0.0, texture = 0.5, grains = 12.0,
+		fire = 0.0, hold = 0.0, semiShift = 0.0, grainLen = 0.05, mix = 1.0,
 		feedback = 0.0, compress = 0.0, binaural = 0.0, scale = 0.0, voct = 0.0,
-		speed = 1.0, heads = 1.0, headSpread = 0.0, headTune = 0.0, snap = 0.0,
-		color = 0.0, tilt = 0.5, tiltSpread = 0.0, window = 0.0,
+		speed = 0.0, heads = 1.0, headSpread = 0.0, headTune = 0.0, snap = 0.0,
+		color = 0.0, tilt = 0.0, tiltSpread = 0.0, window = 0.0,
 		// menu options, 1-based to match od::OptionControl on the device
 		playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;
 
