@@ -28,6 +28,7 @@ all: help
 # inlets ALONE, so a map with two entries transposed cannot pass by having the
 # errors cancel in aggregate.
 ugentest:
+	@bash tools/check-ugen-names.sh
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) -Inorns -Iengine -Itest/scstub -DFRAMELENGTH=64 \
 	  $(ENGINE) norns/od/shim.cpp test/scstub/driver.cpp -o build/ugentest
@@ -169,6 +170,6 @@ help:
 	@echo "  make verify-vendor   UPSTREAM=../dirac"
 	@echo "  make reference       diff vs the canonical 128 render (ER-301 parity)"
 	@echo "  make reference64     diff vs the canonical 64 render (norns target)"
-	@echo "  make ugentest        drive the UGen through a stub scsynth"
+	@echo "  make ugentest        name/order gates + drive the UGen through a stub scsynth"
 	@echo "  make portcheck       RUN THIS ON THE PI — the ARM float question,"
 	@echo "                       with no SuperCollider involved"

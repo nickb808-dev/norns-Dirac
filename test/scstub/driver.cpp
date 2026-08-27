@@ -1,4 +1,4 @@
-// driver.cpp — run DiracUGen off-device and prove the wiring is right.
+// driver.cpp — run Dirac off-device and prove the wiring is right.
 //
 // THE TEST: drive the wrapper and a bare engine with identical control values
 // and identical input audio, then compare the outputs sample for sample. Both
@@ -62,13 +62,13 @@ struct Host {
     std::vector<std::vector<float>> outBufs;
     std::vector<float *>  inPtrs, outPtrs;
     Rate                  rate{};
-    // DiracUGen is a Unit subclass, so the host must give it storage of the
+    // Dirac is a Unit subclass, so the host must give it storage of the
     // derived size — the same trick scsynth's DefineDtorUnit performs.
     std::vector<char>     storage;
 
     void build(int blockLen, bool fireAudioRate = true)
     {
-        storage.assign(sizeof(DiracUGen), 0);
+        storage.assign(sizeof(Dirac), 0);
         inputSpecs.resize(kNumInputs);
         inBufs.resize(kNumInputs);
         outBufs.resize(2);
@@ -90,7 +90,7 @@ struct Host {
         rate.mSampleRate = 48000.0;
         rate.mBufLength  = blockLen;
 
-        DiracUGen *du = reinterpret_cast<DiracUGen *>(storage.data());
+        Dirac *du = reinterpret_cast<Dirac *>(storage.data());
         du->mWorld      = nullptr;
         du->mNumInputs  = kNumInputs;
         du->mNumOutputs = 2;
@@ -102,7 +102,7 @@ struct Host {
         du->mCalcFunc   = nullptr;
     }
 
-    DiracUGen *unit() { return reinterpret_cast<DiracUGen *>(storage.data()); }
+    Dirac *unit() { return reinterpret_cast<Dirac *>(storage.data()); }
     void ctor() { scstub_ctor(reinterpret_cast<Unit *>(storage.data())); }
     void dtor() { scstub_dtor(reinterpret_cast<Unit *>(storage.data())); }
     void set(int idx, float v) { for (auto &x : inBufs[idx]) x = v; }
@@ -115,9 +115,15 @@ struct Host {
 
 // The control set: every inlet at a distinct, non-default, in-range value, so a
 // transposed pair in the map cannot cancel out.
+//
+// PLAYHEAD MUST STAY SMALL. In live mode it indexes the 131072-sample capture
+// ring, and this test only renders 400 blocks = 25600 samples. Playhead 0.41
+// points at sample ~53700 — a part of the ring nothing has written yet — so
+// every grain reads silence and 27 of 28 inlets measure as inert. That is
+// correct engine behaviour and a broken test.
 struct CtlVal { int idx; float v; const char *name; };
 static const CtlVal kCtls[] = {
-    {kPlayhead,0.41f,"Playhead"}, {kRate,4.7f,"Rate"},       {kPosJtr,0.29f,"PosJtr"},
+    {kPlayhead,0.05f,"Playhead"}, {kRate,4.7f,"Rate"},       {kPosJtr,0.29f,"PosJtr"},
     {kSpread,0.63f,"Spread"},     {kDetune,0.7f,"Detune"},   {kLevel,0.83f,"Level"},
     {kRevProb,0.31f,"RevProb"},   {kPsprd,4.2f,"Psprd"},     {kTexture,0.37f,"Texture"},
     {kGrains,11.0f,"Grains"},     {kHold,0.0f,"Hold"},       {kSemiShift,3.0f,"SemiShift"},
@@ -130,7 +136,101 @@ static const CtlVal kCtls[] = {
 };
 static const int kNumCtls = sizeof(kCtls) / sizeof(kCtls[0]);
 
-static void setEnginePort(dirac::Dirac *d, int idx, float *buf) { portFor(d, idx)->point(buf); }
+// How long to render before comparing. This is not a taste parameter.
+//
+// At 64 samples a block, 24 blocks is 32 ms — SHORTER THAN THE 77 ms GRAIN
+// under test. Nothing but the dry path had contributed yet, so 27 of the 28
+// inlets measured as having no effect and the per-inlet test verified exactly
+// one of them while reporting a pass. 400 blocks is 0.53 s: several grains
+// spawn, run and finish.
+static const int kProbeBlocks = 400;
+
+// A second, clearly different value for each inlet, in the same order. The
+// per-inlet test moves ONE control from kCtls to kAltVal and checks the change
+// reaches the engine. Values are chosen to be audibly distinct rather than
+// merely different — e.g. Grains 11 -> 3, not 11 -> 11.5.
+static const float kAltVal[] = {
+    0.12f,  // Playhead
+    9.0f,   // Rate
+    0.90f,  // PosJtr
+    0.05f,  // Spread
+   -7.0f,   // Detune
+    0.25f,  // Level
+    0.95f,  // RevProb
+   11.0f,   // Psprd
+    0.95f,  // Texture
+    3.0f,   // Grains
+    1.0f,   // Hold
+  -12.0f,   // SemiShift
+    0.25f,  // GrainLen
+    0.10f,  // Mix
+    0.90f,  // Feedback
+    0.05f,  // Compress
+    0.95f,  // Binaural
+    5.0f,   // Scale
+   -0.5f,   // V/Oct
+   -2.0f,   // Speed
+    1.0f,   // Heads
+    0.95f,  // HeadSpread
+  -11.0f,   // HeadTune
+    0.05f,  // Snap
+    0.95f,  // Color
+    0.10f,  // Tilt
+    0.90f,  // TiltSpread
+    6.0f,   // Window
+};
+static_assert(sizeof(kAltVal)/sizeof(kAltVal[0]) == kNumCtls,
+              "kAltVal must have one entry per kCtls entry, in the same order");
+
+// An INDEPENDENT transcription of the inlet map.
+//
+// This deliberately does NOT call the wrapper's portFor(). An earlier version
+// did, and it made the per-inlet test worthless: with both sides sharing one
+// table, transposing two entries transposed them for the reference too and the
+// outputs matched exactly. Verified by doing it — swapping Tilt and TiltSpread
+// passed every case.
+//
+// So the reference names each member itself. Two lists written from the same
+// source of truth, compared by rendering audio: that is the only arrangement
+// where disagreement can show up as a difference.
+static void setEnginePort(dirac::Dirac *d, int idx, float *buf)
+{
+    od::Port *p = nullptr;
+    switch (idx) {
+        case 0:  p = &d->mIn;          break;
+        case 1:  p = &d->mPlayheadIn;  break;
+        case 2:  p = &d->mRateIn;      break;
+        case 3:  p = &d->mPosJtrIn;    break;
+        case 4:  p = &d->mSprdIn;      break;
+        case 5:  p = &d->mDetuneIn;    break;
+        case 6:  p = &d->mLevelIn;     break;
+        case 7:  p = &d->mRevProbIn;   break;
+        case 8:  p = &d->mPsprdIn;     break;
+        case 9:  p = &d->mTextureIn;   break;
+        case 10: p = &d->mGrainsIn;    break;
+        case 11: p = &d->mFireIn;      break;
+        case 12: p = &d->mHoldIn;      break;
+        case 13: p = &d->mSemiShiftIn; break;
+        case 14: p = &d->mGrainLenIn;  break;
+        case 15: p = &d->mMixIn;       break;
+        case 16: p = &d->mFeedbackIn;  break;
+        case 17: p = &d->mCompressIn;  break;
+        case 18: p = &d->mBinauralIn;  break;
+        case 19: p = &d->mScaleIn;     break;
+        case 20: p = &d->mVoctIn;      break;
+        case 21: p = &d->mSpeedIn;     break;
+        case 22: p = &d->mHeadsIn;     break;
+        case 23: p = &d->mHeadSpreadIn;break;
+        case 24: p = &d->mHeadTuneIn;  break;
+        case 25: p = &d->mSnapIn;      break;
+        case 26: p = &d->mColorIn;     break;
+        case 27: p = &d->mTiltIn;      break;
+        case 28: p = &d->mTiltSprdIn;  break;
+        case 29: p = &d->mWindowIn;    break;
+        default: return;
+    }
+    p->point(buf);
+}
 
 // Reference: the engine driven directly, with no wrapper in the way.
 static void renderBare(std::vector<float> &L, std::vector<float> &R, int blocks,
@@ -217,13 +317,13 @@ int main()
     InterfaceTable table{};
     scstub_pluginload(&table);
 
-    printf("DiracUGen wiring tests (FRAMELENGTH=%d)\n", (int)FRAMELENGTH);
+    printf("Dirac wiring tests (FRAMELENGTH=%d)\n", (int)FRAMELENGTH);
 
     // 1. all inlets at once
     {
         std::vector<float> bL, bR, wL, wR;
-        renderBare(bL, bR, 60, kCtls, kNumCtls, 0.0f);
-        renderWrapped(wL, wR, 60, kCtls, kNumCtls, 0.0f);
+        renderBare(bL, bR, kProbeBlocks, kCtls, kNumCtls, 0.0f);
+        renderWrapped(wL, wR, kProbeBlocks, kCtls, kNumCtls, 0.0f);
         double md = 0;
         bool ok = same(bL, wL, &md);
         double md2 = 0; ok = ok && same(bR, wR, &md2);
@@ -234,31 +334,67 @@ int main()
         report("nonsilent", nonzero, nonzero ? "" : "wrapper produced pure silence");
     }
 
-    // 2. one inlet at a time — catches transposed map entries that case 1 misses
+    // 2. one inlet at a time — catches transposed map entries that case 1 misses.
+    //
+    // With a SENSITIVITY PRECONDITION, which is the part that makes this mean
+    // anything. Comparing rendered audio can only verify a control that CHANGES
+    // the audio. An inlet that is inert at the surrounding settings passes
+    // trivially, and counting it as verified is a false guarantee — measured:
+    // transposing Tilt and TiltSpread in the wrapper changed no sample at all,
+    // because the selected Window shape ignores both.
+    //
+    // So each inlet is first checked against a render with it left at default.
+    // Inert ones are reported as inert rather than counted as passing.
     {
-        int bad = 0; std::string names;
+        int bad = 0, inert = 0, checked = 0;
+        std::string badNames, inertNames;
+
+        // The baseline is the FULL control set, not an empty one. Varying a
+        // single inlet against silence proves nothing: with everything else at
+        // zero, Level is zero and the render is silent whatever else changes.
+        // Measured — 27 of 28 inlets looked "inert" that way.
+        std::vector<float> baseL, baseR;
+        renderBare(baseL, baseR, kProbeBlocks, kCtls, kNumCtls, 0.0f);
+
         for (int i = 0; i < kNumCtls; ++i) {
+            std::vector<CtlVal> alt(kCtls, kCtls + kNumCtls);
+            alt[i].v = kAltVal[i];                    // one inlet moved
+
             std::vector<float> bL, bR, wL, wR;
-            renderBare(bL, bR, 24, &kCtls[i], 1, 0.0f);
-            renderWrapped(wL, wR, 24, &kCtls[i], 1, 0.0f);
+            renderBare(bL, bR, kProbeBlocks, alt.data(), kNumCtls, 0.0f);
+
+            double sens = 0;
+            if (same(bL, baseL, &sens)) {
+                // Moving this inlet changed no sample, so rendered audio cannot
+                // verify its wiring. Say so instead of counting it as passed.
+                ++inert;
+                if (!inertNames.empty()) inertNames += ",";
+                inertNames += kCtls[i].name;
+                continue;
+            }
+
+            ++checked;
+            renderWrapped(wL, wR, kProbeBlocks, alt.data(), kNumCtls, 0.0f);
             double md = 0, md2 = 0;
             if (!same(bL, wL, &md) || !same(bR, wR, &md2)) {
                 ++bad;
-                if (!names.empty()) names += ",";
-                names += kCtls[i].name;
+                if (!badNames.empty()) badNames += ",";
+                badNames += kCtls[i].name;
             }
         }
-        char d[512];
-        snprintf(d, sizeof d, bad ? "%d wrong: %s" : "%d inlets each verified alone",
-                 bad ? bad : kNumCtls, bad ? names.c_str() : "");
+        char d[768];
+        if (bad) snprintf(d, sizeof d, "%d wrong: %s", bad, badNames.c_str());
+        else if (inert) snprintf(d, sizeof d, "%d verified; %d INERT here (%s)",
+                                 checked, inert, inertNames.c_str());
+        else snprintf(d, sizeof d, "%d inlets each verified alone", checked);
         report("perinlet", bad == 0, d);
     }
 
     // 3. Fire as a control-rate wire — exercises the fan-out path
     {
         std::vector<float> bL, bR, wL, wR;
-        renderBare(bL, bR, 40, kCtls, kNumCtls, 1.0f);
-        renderWrapped(wL, wR, 40, kCtls, kNumCtls, 1.0f, /*fireAudioRate=*/false);
+        renderBare(bL, bR, kProbeBlocks, kCtls, kNumCtls, 1.0f);
+        renderWrapped(wL, wR, kProbeBlocks, kCtls, kNumCtls, 1.0f, /*fireAudioRate=*/false);
         double md = 0, md2 = 0;
         bool ok = same(bL, wL, &md) && same(bR, wR, &md2);
         char d[128]; snprintf(d, sizeof d, "control-rate Fire fanned out, max|diff|=%.3g", md);
@@ -285,31 +421,20 @@ int main()
                       : "did not silence output");
     }
 
-    // 5. pool exhaustion must degrade to silence, not to a crash or a shared
-    //    engine — two units sharing one Dirac would sound plausible and be wrong
+    // 5. two units must be INDEPENDENT, and a fresh unit must be REPEATABLE.
+    //    This replaces an engine-pool test. The pool handed engines back dirty
+    //    — stale capture ring, advanced RNG — and the per-inlet test caught it
+    //    as 27 false failures. Constructing per unit is what makes these two
+    //    properties hold, so they are what gets checked.
     {
-        std::vector<Host *> hs;
-        int live = 0;
-        for (int i = 0; i < kPoolSize + 2; ++i) {
-            Host *h = new Host(); h->build(FRAMELENGTH); h->ctor();
-            if (h->unit()->live) ++live;
-            hs.push_back(h);
-        }
-        bool distinct = true;
-        for (size_t i = 0; i < hs.size(); ++i)
-            for (size_t j = i + 1; j < hs.size(); ++j)
-                if (hs[i]->unit()->live && hs[j]->unit()->live &&
-                    hs[i]->unit()->engine == hs[j]->unit()->engine) distinct = false;
-        for (auto *h : hs) { h->dtor(); delete h; }
-        char d[128];
-        snprintf(d, sizeof d, "%d of %d live, no engine shared", live, kPoolSize + 2);
-        report("pool", live == kPoolSize && distinct, d);
-
-        // and the pool must be reusable after those releases
-        Host h; h.build(FRAMELENGTH); h.ctor();
-        bool reusable = h.unit()->live;
-        h.dtor();
-        report("poolreuse", reusable, reusable ? "released slots came back" : "");
+        std::vector<float> aL, aR, bL, bR;
+        renderWrapped(aL, aR, kProbeBlocks, kCtls, kNumCtls, 0.0f);
+        renderWrapped(bL, bR, kProbeBlocks, kCtls, kNumCtls, 0.0f);
+        double md = 0;
+        bool repeatable = same(aL, bL, &md);
+        report("repeat", repeatable,
+               repeatable ? "second unit renders identically to the first"
+                          : "a fresh unit inherited state from a previous one");
     }
 
     // 6. RTAlloc failure must be handled, not ignored
@@ -334,6 +459,6 @@ int main()
         report("noleak", gRtBlocks == before, d);
     }
 
-    printf("%s\n", gFails ? "FAILED" : ">>> DiracUGen: all wiring tests passed");
+    printf("%s\n", gFails ? "FAILED" : ">>> Dirac: all wiring tests passed");
     return gFails ? 1 : 0;
 }

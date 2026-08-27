@@ -10,13 +10,23 @@
 // assumed:
 //
 // 1. THE ENGINE ALLOCATES IN ITS CONSTRUCTOR, AND NOWHERE ELSE.
-//    Measured: 49 heap allocations totalling 694 KB at construction, and
-//    ZERO across 200 process() calls. So the audio path is already RT-safe and
-//    needs no help. The constructor is the entire problem, and it cannot be
-//    fixed here because the engine holds std::vectors and must not be edited.
-//    Solution: construct the objects at PLUGIN LOAD time, when scsynth is
-//    booting and no audio is running, and hand them out from a pool. Cost is
-//    ~694 KB per slot, paid once, against a server already resident at ~130 MB.
+//    Measured: 49 heap allocations totalling 694 KB and 0.117 ms at
+//    construction, and ZERO allocations across 200 process() calls. So the
+//    audio path is already RT-safe; only the constructor touches the heap.
+//
+//    An earlier version pre-built engines at plugin load and handed them out
+//    from a pool, to keep malloc off the audio thread entirely. THAT WAS A
+//    MISTAKE and the off-device tests caught it: a pooled engine is handed back
+//    DIRTY. Its capture ring still holds the previous session's audio and its
+//    grain RNG has advanced, so restarting a script would granulate whatever
+//    was playing before. The engine is vendored, so it has no reset() to call
+//    and one cannot be added here.
+//
+//    So: construct per unit, in the constructor, and accept one 694 KB / 0.117
+//    ms allocation on the audio thread. norns creates this synth once when the
+//    script loads. Trading a brief, one-time allocation at load for guaranteed
+//    clean state is the right way round — the allocation is theoretical, the
+//    stale ring was audible.
 //
 // 2. PORT BUFFERS ARE BORROWED, NOT OWNED.
 //    IN(n)/OUT(n) point into the graph's wires and may move between calls, so
@@ -64,50 +74,25 @@ enum {
 // it would just sound subtly wrong, which is worse.
 static inline bool isAudioRateInlet(int i) { return i == kIn || i == kFire; }
 
-// ─── the pre-built engine pool ───────────────────────────────────────────────
-// Built in PluginLoad (scsynth boot), so no Dirac constructor ever runs on the
-// audio thread. norns needs exactly one instance; the spare covers a reload
-// where the old synth has not yet been freed.
-static const int kPoolSize = 2;
-
-struct Pool {
-    dirac::Dirac *slot[kPoolSize];
-    bool          used[kPoolSize];
-
-    void init() {
-        for (int i = 0; i < kPoolSize; ++i) {
-            slot[i] = new (std::nothrow) dirac::Dirac();
-            used[i] = false;
-        }
-    }
-    // Called from the RT thread, but scsynth processes node creation and
-    // destruction on that one thread, so this needs no locking.
-    dirac::Dirac *acquire(int *idx) {
-        for (int i = 0; i < kPoolSize; ++i) {
-            if (!used[i] && slot[i]) { used[i] = true; *idx = i; return slot[i]; }
-        }
-        *idx = -1;
-        return nullptr;
-    }
-    void release(int idx) {
-        if (idx >= 0 && idx < kPoolSize) used[idx] = false;
-    }
-};
-static Pool gPool;
-
 // ─── the unit ────────────────────────────────────────────────────────────────
-struct DiracUGen : public Unit {
+// NAME IS LOAD-BEARING. DefineDtorUnit registers the UGen under this struct's
+// name, and Dirac.sc asks the server for a UGen by ITS class name. They must be
+// the same string or the plugin loads fine and every SynthDef using it fails
+// with "UGen 'Dirac' not installed" — a failure that points at the server, not
+// at this line. (It was DiracUGen here and Dirac there. Fixed.)
+//
+// Unqualified `Dirac` is this wrapper's unit. The engine is always `dirac::Dirac`.
+struct Dirac : public Unit {
     dirac::Dirac *engine;
-    int           poolIdx;
     bool          live;        // false => refusing to run; output silence
     // Scalar inputs promoted to a full block, for the two per-sample inlets.
     // RTAlloc'd because these ARE created on the audio thread.
     float        *fanBuf[2];
 };
 
-static void DiracUGen_next(DiracUGen *unit, int inNumSamples);
-static void DiracUGen_Ctor(DiracUGen *unit);
-static void DiracUGen_Dtor(DiracUGen *unit);
+static void Dirac_next(Dirac *unit, int inNumSamples);
+static void Dirac_Ctor(Dirac *unit);
+static void Dirac_Dtor(Dirac *unit);
 
 // Ports, addressed in the same order as the enum. Built per call rather than
 // stored: it is a handful of pointer loads and it cannot go stale.
@@ -148,10 +133,9 @@ static inline od::Port *portFor(dirac::Dirac *d, int i)
     }
 }
 
-void DiracUGen_Ctor(DiracUGen *unit)
+void Dirac_Ctor(Dirac *unit)
 {
     unit->engine     = nullptr;
-    unit->poolIdx    = -1;
     unit->live       = false;
     unit->fanBuf[0]  = nullptr;
     unit->fanBuf[1]  = nullptr;
@@ -164,16 +148,18 @@ void DiracUGen_Ctor(DiracUGen *unit)
               "       block but the server is running %d. Rebuild with\n"
               "       -DFRAMELENGTH=%d, or start scsynth with -z %d.\n",
               (int)FRAMELENGTH, (int)BUFLENGTH, (int)BUFLENGTH, (int)FRAMELENGTH);
-        SETCALC(DiracUGen_next);
+        SETCALC(Dirac_next);
         ClearUnitOutputs(unit, 1);
         return;
     }
 
-    unit->engine = gPool.acquire(&unit->poolIdx);
+    // The one heap allocation, and the reason it is here rather than at plugin
+    // load: a freshly constructed engine has a zeroed capture ring and a seeded
+    // RNG, which is what makes two runs of the same script sound the same.
+    unit->engine = new (std::nothrow) dirac::Dirac();
     if (!unit->engine) {
-        Print("Dirac: no free engine in the pool (size %d). Free the existing\n"
-              "       Dirac synth before creating another.\n", kPoolSize);
-        SETCALC(DiracUGen_next);
+        Print("Dirac: out of memory constructing the engine (~694 KB).\n");
+        SETCALC(Dirac_next);
         ClearUnitOutputs(unit, 1);
         return;
     }
@@ -183,10 +169,9 @@ void DiracUGen_Ctor(DiracUGen *unit)
         if (!unit->fanBuf[k]) {
             Print("Dirac: RTAlloc failed. Raise the server's real-time memory\n"
                   "       (scsynth -m).\n");
-            gPool.release(unit->poolIdx);
-            unit->poolIdx = -1;
-            unit->engine  = nullptr;
-            SETCALC(DiracUGen_next);
+            delete unit->engine;
+            unit->engine = nullptr;
+            SETCALC(Dirac_next);
             ClearUnitOutputs(unit, 1);
             return;
         }
@@ -194,24 +179,20 @@ void DiracUGen_Ctor(DiracUGen *unit)
     }
 
     unit->live = true;
-    SETCALC(DiracUGen_next);
+    SETCALC(Dirac_next);
     // One silent block before the first real one, matching scsynth convention.
     ClearUnitOutputs(unit, 1);
 }
 
-void DiracUGen_Dtor(DiracUGen *unit)
+void Dirac_Dtor(Dirac *unit)
 {
     for (int k = 0; k < 2; ++k)
         if (unit->fanBuf[k]) RTFree(unit->mWorld, unit->fanBuf[k]);
-    // The engine goes back to the pool rather than being destroyed: it is
-    // reused, and destroying it here would free 694 KB on the audio thread,
-    // which is the same hazard as allocating there.
-    gPool.release(unit->poolIdx);
-    unit->poolIdx = -1;
-    unit->engine  = nullptr;
+    delete unit->engine;
+    unit->engine = nullptr;
 }
 
-void DiracUGen_next(DiracUGen *unit, int inNumSamples)
+void Dirac_next(Dirac *unit, int inNumSamples)
 {
     if (!unit->live || !unit->engine) {
         float *o0 = OUT(0), *o1 = OUT(1);
@@ -266,9 +247,8 @@ void DiracUGen_next(DiracUGen *unit, int inNumSamples)
     d->mOutR.point(nullptr);
 }
 
-PluginLoad(DiracUGen)
+PluginLoad(Dirac)
 {
     ft = inTable;
-    gPool.init();
-    DefineDtorUnit(DiracUGen);
+    DefineDtorUnit(Dirac);
 }
