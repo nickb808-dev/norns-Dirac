@@ -15,7 +15,7 @@ HOSTINC      := -Itest/host -Iengine
 NORNSINC     := -Inorns -Iengine
 CXXFLAGS     := -std=c++17 -O2 -ffast-math -Wall -Wno-unused-parameter
 
-.PHONY: all check hosttest shimtest verify-vendor reference ugentest luacheck paramcheck portcheck clean help
+.PHONY: all check hosttest shimtest verify-vendor reference ugentest luacheck sccheck paramcheck portcheck clean help
 all: help
 
 # ── the Lua and glue-layer gates ─────────────────────────────────────────────
@@ -24,6 +24,9 @@ all: help
 # norns tries to run it. These make both checkable here.
 luacheck:
 	@bash tools/check-lua.sh
+
+sccheck:
+	@bash tools/check-sc-collisions.sh
 
 paramcheck:
 	@bash tools/check-params.sh
@@ -139,7 +142,7 @@ reference64: hosttest64
 	  exit 1; \
 	fi
 
-check: verify-vendor shimtest hosttest reference hosttest64 reference64 ugentest luacheck paramcheck
+check: verify-vendor shimtest hosttest reference hosttest64 reference64 ugentest luacheck sccheck paramcheck
 
 # ── run this ON THE PI ────────────────────────────────────────────────────────
 # Everything in `check` except verify-vendor, which needs an upstream ER-301
@@ -173,7 +176,7 @@ clean:
 
 help:
 	@echo "norns-dirac $(VERSION) — Phase 2 (engine + params; no custom UI yet)"
-	@echo "  make check           all nine gates (off-device)"
+	@echo "  make check           all ten gates (off-device)"
 	@echo "  make hosttest        the ported ER-301 harness at FRAMELENGTH=128"
 	@echo "  make hosttest64      the same harness at 64 — what norns runs"
 	@echo "  make shimtest        compile the engine against norns/od/"
@@ -182,6 +185,7 @@ help:
 	@echo "  make reference64     diff vs the canonical 64 render (norns target)"
 	@echo "  make ugentest        name/order gates + drive the UGen through a stub scsynth"
 	@echo "  make luacheck        parse every .lua (no compiler otherwise)"
+	@echo "  make sccheck         no *.sc collides with an installed SC class"
 	@echo "  make paramcheck      params.lua = addCommand = SynthDef arg"
 	@echo "  make portcheck       RUN THIS ON THE PI — the ARM float question,"
 	@echo "                       with no SuperCollider involved"

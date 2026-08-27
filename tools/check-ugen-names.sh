@@ -6,7 +6,7 @@
 #
 #   1. the engine's registration order   engine/Dirac.cpp, Dirac::Dirac()
 #   2. the wrapper's input enum          ugen/DiracUGen.cpp
-#   3. the SC class's argument order     ugen/Dirac.sc
+#   3. the SC class's argument order     ugen/Dirac.sc.in
 #
 # Drift produces a synth that runs perfectly with every control on the wrong
 # knob — no error, no crash, just wrong. And the UGen NAME must match between
@@ -19,7 +19,7 @@ fail=0
 
 # ── 1. the registered name vs the SC class name ──────────────────────────────
 reg=$(grep -oP 'DefineDtorUnit\(\K[A-Za-z_]+' ugen/DiracUGen.cpp | head -1)
-cls=$(grep -oP '^\s*\K[A-Za-z_]+(?=\s*:\s*MultiOutUGen)' ugen/Dirac.sc | head -1)
+cls=$(grep -oP '^\s*\K[A-Za-z_]+(?=\s*:\s*MultiOutUGen)' ugen/Dirac.sc.in | head -1)
 if [ "$reg" = "$cls" ]; then
     echo "check-ugen-names: OK    unit registered as '$reg', SC class is '$cls'"
 else
@@ -61,7 +61,7 @@ fi
 # enough to catch an inlet added upstream and wired in one place but not both.
 n_wrap=$(sed -n '/od::Port \*portFor/,/^}/p' ugen/DiracUGen.cpp | grep -c 'return &d->')
 n_opts=$(grep -c 'Opt\.set(' ugen/DiracUGen.cpp)
-n_sc=$(sed -n '/\*ar {/,/multiNew/p' ugen/Dirac.sc \
+n_sc=$(sed -n '/\*ar {/,/multiNew/p' ugen/Dirac.sc.in \
        | grep -oP '\b[a-zA-Z][a-zA-Z0-9]*\s*=' | wc -l)
 want=$((n_wrap + n_opts))
 if [ "$n_sc" -eq "$want" ]; then

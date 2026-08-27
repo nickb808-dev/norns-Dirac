@@ -1,4 +1,24 @@
-// Dirac.sc - SuperCollider class for the Dirac UGen.
+// Dirac.sc.in - SuperCollider class for the Dirac UGen.
+//
+// THE .in EXTENSION IS DELIBERATE AND LOAD-BEARING.
+//
+// sclang scans ~/dust/code RECURSIVELY for *.sc and compiles everything it
+// finds. This repo lives there on the norns, so a file named Dirac.sc here
+// would be compiled IN ADDITION to the installed copy in
+// ~/.local/share/SuperCollider/Extensions/Dirac/, and two definitions of one
+// class is a hard class-library failure:
+//
+//   ERROR: duplicate Class found: 'Dirac'
+//     /home/we/.local/share/SuperCollider/Extensions/Dirac/Dirac.sc
+//     /home/we/dust/code/norns-dirac/ugen/Dirac.sc
+//
+// That is not a warning. The whole class library fails to compile, norns shows
+// SUPERCOLLIDER FAIL, and NO script will load - not just this one. It cost a
+// working norns twice before the error was actually read.
+//
+// `make install` copies this file to Extensions as Dirac.sc. Nothing in the
+// repo may be named *.sc except lib/Engine_*.sc, which is SUPPOSED to be
+// scanned from dust/code; tools/check-sc-collisions.sh enforces that.
 //
 // Deliberately minimal, and ASCII-only. An earlier version of this file broke
 // the SuperCollider class library outright (norns showed SUPERCOLLIDER FAIL and

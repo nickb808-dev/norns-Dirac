@@ -55,7 +55,7 @@ EXTDIR := $(HOME)/.local/share/SuperCollider/Extensions/$(PLUGIN)
 
 all: $(PLUGIN).so
 
-$(PLUGIN).so: $(WRAPPER) $(ENGINE) $(SHIM)
+$(PLUGIN).so: $(WRAPPER) $(ENGINE) $(SHIM) $(PLUGIN).sc.in
 	@if [ -z "$(SC_DIR)" ]; then \
 	  echo "ERROR: SC_PlugIn.h not found. Looked in:"; \
 	  for d in $(SC_CANDIDATES); do echo "         $$d/plugin_interface"; done; \
@@ -74,10 +74,30 @@ info:
 	@echo "arch         : $$(uname -m)"
 	@echo "install to   : $(EXTDIR)"
 
+# The class file is Dirac.sc.IN in the repo and becomes Dirac.sc only here.
+# sclang compiles every *.sc under ~/dust/code, so a Dirac.sc left in the repo
+# would be a second definition of the class and the whole class library would
+# fail: "duplicate Class found: 'Dirac'". That takes down every script on the
+# norns, not just this one.
 install: $(PLUGIN).so
+	@test -s $(PLUGIN).sc.in || { \
+	  echo "install: FAIL  $(PLUGIN).sc.in is missing or EMPTY."; \
+	  echo "               Refusing to install a class file with no class in it —"; \
+	  echo "               that produces a server that boots but hangs every script."; \
+	  exit 1; }
+	@grep -qE '^$(PLUGIN) *: *MultiOutUGen' $(PLUGIN).sc.in || { \
+	  echo "install: FAIL  $(PLUGIN).sc.in does not declare '$(PLUGIN) : MultiOutUGen'"; \
+	  exit 1; }
 	mkdir -p $(EXTDIR)
-	cp $(PLUGIN).so $(PLUGIN).sc $(EXTDIR)/
-	@echo "installed to $(EXTDIR)"
+	cp $(PLUGIN).so $(EXTDIR)/
+	cp $(PLUGIN).sc.in $(EXTDIR)/$(PLUGIN).sc
+	@a=$$(wc -c < $(PLUGIN).sc.in); b=$$(wc -c < $(EXTDIR)/$(PLUGIN).sc); \
+	 if [ "$$a" != "$$b" ]; then \
+	   echo "install: FAIL  copied class file is $$b bytes, source is $$a"; \
+	   exit 1; \
+	 fi; \
+	 echo "install: OK    $(PLUGIN).so + $(PLUGIN).sc ($$b bytes) -> $(EXTDIR)"
+	@echo
 	@echo
 	@echo "Restart the audio engine for scsynth to pick it up (SYSTEM > RESET on"
 	@echo "the norns, or reboot). scsynth reports plugin load failures at boot —"
