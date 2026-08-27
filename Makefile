@@ -1,14 +1,12 @@
 # norns-dirac — Dirac (canonical ER-301 engine) as a norns script.
 #
-# Phase 0 targets only. The UGen build arrives in Phase 1, once the SC plugin
-# headers are on the Pi.
+# `make help` lists the targets. Two are worth knowing about up front:
 #
-#   make hosttest        build + run the 17-suite ported harness (off-device)
-#   make shimtest        build the engine against the NORNS shim (not the host
-#                        stubs) — proves the shim is a working third target
-#   make verify-vendor   diff engine/ against an upstream checkout; fails on any
-#                        difference  (UPSTREAM=../dirac)
-#   make check           all three
+#   make check       everything, off-device. Run before every commit.
+#   make portcheck   run this ON THE PI. Asks the one question a dev host
+#                    cannot: does the engine compute the same on 32-bit ARM?
+#
+# The UGen itself lives in ugen/ and is built there, natively on the target.
 #
 VERSION      := 0.1.0
 UPSTREAM     ?= ../dirac
@@ -17,8 +15,23 @@ HOSTINC      := -Itest/host -Iengine
 NORNSINC     := -Inorns -Iengine
 CXXFLAGS     := -std=c++17 -O2 -ffast-math -Wall -Wno-unused-parameter
 
-.PHONY: all check hosttest shimtest verify-vendor reference clean help
+.PHONY: all check hosttest shimtest verify-vendor reference ugentest portcheck clean help
 all: help
+
+# ── the UGen wrapper, run off-device ─────────────────────────────────────────
+# Drives DiracUGen.cpp through a stub scsynth (test/scstub/) and compares its
+# output against the bare engine driven directly. Same DSP both sides, same
+# machine, so the only thing that can differ is the WIRING — which is all the
+# wrapper is.
+#
+# The per-inlet case is the valuable one: it checks each of the 28 control
+# inlets ALONE, so a map with two entries transposed cannot pass by having the
+# errors cancel in aggregate.
+ugentest:
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) -Inorns -Iengine -Itest/scstub -DFRAMELENGTH=64 \
+	  $(ENGINE) norns/od/shim.cpp test/scstub/driver.cpp -o build/ugentest
+	@./build/ugentest
 
 # ── the ported ER-301 harness ────────────────────────────────────────────────
 # Identical source to upstream's test/host. If this passes here and there, the
@@ -115,7 +128,7 @@ reference64: hosttest64
 	  exit 1; \
 	fi
 
-check: verify-vendor shimtest hosttest reference hosttest64 reference64
+check: verify-vendor shimtest hosttest reference hosttest64 reference64 ugentest
 
 # ── run this ON THE PI ────────────────────────────────────────────────────────
 # Everything in `check` except verify-vendor, which needs an upstream ER-301
@@ -148,13 +161,14 @@ clean:
 	rm -rf build
 
 help:
-	@echo "norns-dirac $(VERSION) — Phase 0"
-	@echo "  make check           all six gates"
+	@echo "norns-dirac $(VERSION) — Phase 1 (UGen written, not yet built on target)"
+	@echo "  make check           all seven gates (off-device)"
 	@echo "  make hosttest        the ported ER-301 harness at FRAMELENGTH=128"
 	@echo "  make hosttest64      the same harness at 64 — what norns runs"
 	@echo "  make shimtest        compile the engine against norns/od/"
 	@echo "  make verify-vendor   UPSTREAM=../dirac"
 	@echo "  make reference       diff vs the canonical 128 render (ER-301 parity)"
 	@echo "  make reference64     diff vs the canonical 64 render (norns target)"
+	@echo "  make ugentest        drive the UGen through a stub scsynth"
 	@echo "  make portcheck       RUN THIS ON THE PI — the ARM float question,"
 	@echo "                       with no SuperCollider involved"
