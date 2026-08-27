@@ -74,20 +74,36 @@ verify:
 	  echo "verify: FAIL  $(EXTDIR)/$(PLUGIN).so does not exist."; \
 	  echo "              Nothing to verify - run 'make install' first."; \
 	  exit 1; }
+	@# THE REAL TEST: dlopen, exactly what scsynth does at boot, with no audio
+	@# hardware involved.
+	@#
+	@# An earlier version booted a throwaway scsynth and required it to reach
+	@# "server ready". That cannot work on a live norns: JACK already owns the
+	@# audio device, so the second server dies with "could not initialize
+	@# audio" no matter how good the plugin is. The check failed on a perfectly
+	@# loadable plugin and rolled back a good install.
+	@#
+	@# ctypes.CDLL is the same dlopen call. It catches "file too short",
+	@# unresolved symbols and ABI mismatches - every failure that stops scsynth
+	@# booting - and needs no sound card, no free port and no running server.
+	@python3 -c "import ctypes, sys; \
+	  ctypes.CDLL('$(EXTDIR)/$(PLUGIN).so'); \
+	  print('verify: OK    dlopen succeeded - scsynth will load this plugin')" \
+	  || { \
+	    echo "verify: FAIL  dlopen refused the plugin (above). scsynth would"; \
+	    echo "              refuse to BOOT with this installed - no audio, no"; \
+	    echo "              scripts, and the error would name the server."; \
+	    exit 1; }
+	@# Belt and braces: if scsynth can be started at all, make sure it does not
+	@# name our plugin in a complaint. A failure to init audio is EXPECTED here
+	@# and is not a plugin problem, so it is not treated as one.
 	@out=$$(timeout 20 scsynth -u 57999 -i 2 -o 2 2>&1 | head -40); \
 	 if echo "$$out" | grep -qi "$(PLUGIN).so"; then \
-	   echo "verify: FAIL  scsynth cannot load the plugin:"; \
+	   echo "verify: FAIL  scsynth complained about the plugin:"; \
 	   echo "$$out" | grep -i "$(PLUGIN)" | sed 's/^/              /'; \
-	   echo "              REMOVE IT before rebooting, or the norns will not boot:"; \
-	   echo "              rm -f $(EXTDIR)/$(PLUGIN).so"; \
 	   exit 1; \
 	 fi; \
-	 if ! echo "$$out" | grep -qi "server ready"; then \
-	   echo "verify: FAIL  scsynth did not reach 'server ready':"; \
-	   echo "$$out" | tail -10 | sed 's/^/              /'; \
-	   exit 1; \
-	 fi; \
-	 echo "verify: OK    scsynth booted with $(PLUGIN).so loaded"
+	 echo "verify: OK    scsynth start-up mentions no plugin problem"
 
 all: $(PLUGIN).so
 
