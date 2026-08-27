@@ -53,6 +53,12 @@ EXTDIR := $(HOME)/.local/share/SuperCollider/Extensions/$(PLUGIN)
 
 .PHONY: all info install verify clean
 
+# The first target in a makefile is the default goal, and `verify` was
+# accidentally sitting above `all`, so a bare `make` ran the verifier and built
+# nothing - while reporting success. State the goal explicitly so the ORDER of
+# targets in this file stops being load-bearing.
+.DEFAULT_GOAL := all
+
 # ── does the installed plugin actually LOAD? ─────────────────────────────────
 # The check that was missing, and its absence cost a working norns. A plugin
 # scsynth cannot dlopen stops the SERVER from booting - not just this UGen -
@@ -62,6 +68,12 @@ EXTDIR := $(HOME)/.local/share/SuperCollider/Extensions/$(PLUGIN)
 # Boots a throwaway server on a spare port, which is safe while norns is
 # running, and greps its output for a load failure naming this plugin.
 verify:
+	@# An ABSENT plugin generates no complaint, so a grep-only check passes
+	@# when nothing is installed. That is not a pass, it is a missing subject.
+	@test -f $(EXTDIR)/$(PLUGIN).so || { \
+	  echo "verify: FAIL  $(EXTDIR)/$(PLUGIN).so does not exist."; \
+	  echo "              Nothing to verify - run 'make install' first."; \
+	  exit 1; }
 	@out=$$(timeout 20 scsynth -u 57999 -i 2 -o 2 2>&1 | head -40); \
 	 if echo "$$out" | grep -qi "$(PLUGIN).so"; then \
 	   echo "verify: FAIL  scsynth cannot load the plugin:"; \
@@ -70,7 +82,12 @@ verify:
 	   echo "              rm -f $(EXTDIR)/$(PLUGIN).so"; \
 	   exit 1; \
 	 fi; \
-	 echo "verify: OK    scsynth loaded $(PLUGIN).so without complaint"
+	 if ! echo "$$out" | grep -qi "server ready"; then \
+	   echo "verify: FAIL  scsynth did not reach 'server ready':"; \
+	   echo "$$out" | tail -10 | sed 's/^/              /'; \
+	   exit 1; \
+	 fi; \
+	 echo "verify: OK    scsynth booted with $(PLUGIN).so loaded"
 
 all: $(PLUGIN).so
 
