@@ -1,25 +1,30 @@
 // Engine_Dirac.sc - the norns engine wrapper around the Dirac UGen.
 //
-// Structured after Engine_Pappus, which is a working engine on this same
-// machine, rather than after my assumptions. Two things that cost a whole
-// evening, both of which Pappus already knew:
+// ASCII ONLY. tools/check-sc-collisions.sh enforces it; run `make check`
+// before this file leaves the repo.
+//
+// Structured after Engine_Pappus.sc, a working engine on the same machine,
+// rather than after assumptions. Two things that file already knew:
 //
 // 1. AN UNCAUGHT ERROR IN alloc HANGS THE SCRIPT SILENTLY.
-//    alloc runs inside a Routine and doneCallback only fires when it returns.
+//    alloc runs in a Routine and doneCallback only fires when it returns.
 //    Throw, and matron's engine table stays empty, the script sits on
-//    "loading..." forever, and NOTHING appears in maiden, journalctl, the
-//    matron log or the crone log. That is why six separate log queries found
-//    nothing at all. Hence the try/catch below: an error here must be visible.
+//    "loading..." forever, and nothing appears in maiden, journalctl, matron
+//    or crone. Hence the try/catch.
 //
 // 2. context.in_b IS AN ARRAY OF BUSES, ONE PER CHANNEL.
-//    context.out_b is a single bus and responds to .index; context.in_b does
-//    not - it is indexed per channel first, context.in_b[0].index. Writing
-//    context.in_b.index throws doesNotUnderstand, which (see 1) is invisible.
-//    That was the bug.
+//    context.out_b is a single bus and responds to .index. context.in_b does
+//    not - index the channel first. Writing context.in_b.index throws
+//    doesNotUnderstand, which by (1) is invisible. That was a real bug here.
 //
-// Command names MUST match lib/params.lua's `id` fields: dirac.lua calls
-// engine.<id>(value) by name and a missing command is a silent no-op.
-// tools/check-params.sh compares the lists.
+// KNOWN OPEN ISSUE, 2026-08-27: this engine loads and its commands work, but
+// it produces NO AUDIO on the target. Bisected on-device: a SynthDef
+// containing only SinOsc -> Out.ar, with Dirac removed from the graph
+// entirely, was also silent. So the fault is NOT in the ported engine or the
+// UGen wrapper - it is somewhere between this file and norns' output, despite
+// the Synth.new call being byte-identical to Engine_Pappus.sc's working one.
+// Next step is a minimal tone-only norns script built from scratch, to
+// establish a working baseline before reintroducing any of this.
 Engine_Dirac : CroneEngine {
 
 	var <synth;
@@ -31,9 +36,7 @@ Engine_Dirac : CroneEngine {
 	alloc {
 		try {
 			this.prAlloc;
-			"Engine_Dirac: loaded STAGE3 tone-only".postln;
-			synth.nodeID.postln;
-			context.out_b.index.postln;
+			"Engine_Dirac: loaded".postln;
 		} { arg err;
 			"### Engine_Dirac: alloc failed ###".postln;
 			err.reportError;
@@ -60,31 +63,16 @@ Engine_Dirac : CroneEngine {
 			var src = (In.ar(inbusl, 1) + In.ar(inbusr, 1)) * 0.5;
 
 			// Fire is one of only two inlets the engine reads PER SAMPLE, so
-			// expand it explicitly. The wrapper would fan out a control-rate
-			// value anyway; doing it here means a gate lands on the sample it
-			// was sent on rather than at a block boundary.
+			// expand it explicitly: a gate then lands on the sample it was sent
+			// on rather than at a block boundary.
 			var fireAr = K2A.ar(fire);
 
-			// -- TEMPORARY DIAGNOSTIC - STAGE 3 - REMOVE ------------------
-			// Stage 2 sent a bare tone out of this synth, with Dirac computed but
-			// not summed. Result: silence. A plain SinOsc reaching Out.ar cannot
-			// itself be inaudible, so THE SYNTH IS NOT RUNNING - and since
-			// Dirac.ar was still instantiated in the graph, the likeliest reason
-			// is that constructing the Dirac UGen kills the synth (or the whole
-			// server), taking the tone with it.
-			//
-			// Stage 3 removes Dirac from the graph completely.
-			//   HEAR the tone -> the SynthDef, bus, group and levels are all
-			//                    correct, and Dirac_Ctor is what breaks it. That
-			//                    is C++ I can attack off-device.
-			//   SILENCE       -> the fault is in this file or in norns' routing,
-			//                    and has nothing to do with the port at all.
-			//
-			// src and fireAr are referenced so the args are not optimised away.
-			var unused = (src * 0) + (fireAr * 0);
-			var diagTone = SinOsc.ar(440, 0, 0.08);
-
-			Out.ar(outbus, [diagTone + unused, diagTone + unused]);
+			Out.ar(outbus, Dirac.ar(src,
+				playhead, rate, posjtr, spread, detune, level, revprob, psprd,
+				texture, grains, fireAr, hold, semishift, grainlen, mix, feedback,
+				compress, binaural, scale, voct, speed, heads, headspread,
+				headtune, snap, color, tilt, tiltspread, window,
+				playheadsOpt, diffuseOpt, freezeOpt));
 		}).add;
 
 		srv.sync;
@@ -95,9 +83,8 @@ Engine_Dirac : CroneEngine {
 			\outbus, context.out_b.index
 		], context.xg, \addToTail);
 
-		// One command per parameter. A list rather than 32 near-identical
-		// blocks; tools/check-params.sh reads these symbols and compares them
-		// against lib/params.lua.
+		// One command per parameter. tools/check-params.sh reads these symbols
+		// and compares them against lib/params.lua.
 		[
 			\playhead, \speed, \rate, \grains, \grainlen, \posjtr, \revprob,
 			\semishift, \voct, \psprd, \scale, \window, \texture, \tilt,
