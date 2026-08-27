@@ -17,14 +17,16 @@
 //    not - index the channel first. Writing context.in_b.index throws
 //    doesNotUnderstand, which by (1) is invisible. That was a real bug here.
 //
-// KNOWN OPEN ISSUE, 2026-08-27: this engine loads and its commands work, but
-// it produces NO AUDIO on the target. Bisected on-device: a SynthDef
-// containing only SinOsc -> Out.ar, with Dirac removed from the graph
-// entirely, was also silent. So the fault is NOT in the ported engine or the
-// UGen wrapper - it is somewhere between this file and norns' output, despite
-// the Synth.new call being byte-identical to Engine_Pappus.sc's working one.
-// Next step is a minimal tone-only norns script built from scratch, to
-// establish a working baseline before reintroducing any of this.
+// SILENCE, 2026-08-27, and what the control experiment showed. This engine
+// loaded and its commands worked, but produced NO AUDIO. Bisected on-device:
+// a SynthDef containing only SinOsc -> Out.ar, Dirac removed from the graph
+// entirely, was ALSO silent - so the ported engine and the UGen wrapper were
+// never implicated.
+//
+// test/minimal/ then established that a stock-shaped engine DOES make sound on
+// this machine. The one thing that differed was group placement: TestSine gets
+// \addToHead from .play(target: context.xg); this had \addToTail, copied from
+// Engine_Pappus without asking whether it applied. See the note at Synth.new.
 Engine_Dirac : CroneEngine {
 
 	var <synth;
@@ -81,7 +83,17 @@ Engine_Dirac : CroneEngine {
 			\inbusl, context.in_b[0].index,
 			\inbusr, context.in_b[1].index,
 			\outbus, context.out_b.index
-		], context.xg, \addToTail);
+		], context.xg);
+
+		// NOTE: \addToHead, which is Synth.new's default and what
+		// Engine_TestSine gets from .play(target: context.xg).
+		//
+		// This was \addToTail, copied from Engine_Pappus without asking whether
+		// it suited. Pappus is a long chain that deliberately sits at the end;
+		// this is one synth. The tone-only control experiment (test/minimal/)
+		// makes sound on this device using the default placement, and the same
+		// SynthDef here did not using the tail - which makes group position the
+		// one variable that differs between a working engine and a silent one.
 
 		// One command per parameter. tools/check-params.sh reads these symbols
 		// and compares them against lib/params.lua.
