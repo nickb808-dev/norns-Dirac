@@ -1,4 +1,4 @@
-// Engine_Dirac.sc — the norns engine wrapper around the Dirac UGen.
+// Engine_Dirac.sc - the norns engine wrapper around the Dirac UGen.
 //
 // One long-lived synth, one addCommand per parameter. Deliberately thin: it
 // owns no DSP and no musical decisions, so the only way it can be wrong is by
@@ -6,7 +6,7 @@
 //
 // The command names here MUST match lib/params.lua's `id` fields, because
 // dirac.lua calls engine.<id>(value) by name and a missing command is a silent
-// no-op — the param moves in the menu and nothing happens. tools/check-params.sh
+// no-op - the param moves in the menu and nothing happens. tools/check-params.sh
 // compares the two lists.
 Engine_Dirac : CroneEngine {
 
@@ -27,7 +27,7 @@ Engine_Dirac : CroneEngine {
 			    mix = 1.0, feedback = 0.0, level = 0.7, fire = 0.0, hold = 0.0,
 			    playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;
 
-			// The engine's input is MONO — one od::Inlet. norns hands us a
+			// The engine's input is MONO - one od::Inlet. norns hands us a
 			// stereo pair, so sum and halve rather than silently dropping the
 			// right channel. Halving keeps a centred mono source at unity
 			// instead of 6 dB hot into the capture ring, which matters because
@@ -57,7 +57,7 @@ Engine_Dirac : CroneEngine {
 			\in,  context.in_b.index
 		], context.xg);
 
-		// ── one command per parameter ────────────────────────────────────────
+		// ?? one command per parameter ????????????????????????????????????????
 		// Written out rather than generated from a list, because SuperCollider
 		// has no access to lib/params.lua. The check script is what keeps them
 		// in step; see tools/check-params.sh.
@@ -72,7 +72,7 @@ Engine_Dirac : CroneEngine {
 		};
 
 		// Menu options arrive as ints. They are 1-BASED to match
-		// od::OptionControl on the device — the engine compares against literal
+		// od::OptionControl on the device - the engine compares against literal
 		// 1/2/3, so sending 0 would silently select nothing.
 		[\playheadsOpt, \diffuseOpt, \freezeOpt].do { |name|
 			this.addCommand(name, "i", { |msg| synth.set(name, msg[1]); });
