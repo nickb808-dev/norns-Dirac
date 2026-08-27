@@ -116,6 +116,12 @@ $(PLUGIN).so: $(WRAPPER) $(ENGINE) $(SHIM) $(PLUGIN).sc.in
 	   file $@ | sed 's/^/             /'; \
 	   rm -f $@; exit 1; \
 	 fi; \
+	 if command -v readelf >/dev/null 2>&1; then \
+	   if ! readelf -l $@ >/dev/null 2>&1; then \
+	     echo "build: FAIL  $@ has unreadable program headers - truncated."; \
+	     rm -f $@; exit 1; \
+	   fi; \
+	 fi; \
 	 echo "build: OK    $@ is a $$sz-byte shared object"
 	@echo "OK: $@"
 	@file $@ 2>/dev/null || true
@@ -155,7 +161,16 @@ install: $(PLUGIN).so
 	   echo "install: FAIL  copied .so is $$b bytes, source is $$a"; \
 	   rm -f $(EXTDIR)/$(PLUGIN).so; exit 1; \
 	 fi
-	@$(MAKE) --no-print-directory verify
+	@# If verify fails, REMOVE the plugin rather than leaving it installed.
+	@# A plugin scsynth cannot load bricks the norns at next boot, so "install
+	@# failed" must leave the machine bootable, not armed.
+	@if ! $(MAKE) --no-print-directory verify; then \
+	  echo; \
+	  echo "install: rolling back - removing $(EXTDIR)/$(PLUGIN).so"; \
+	  rm -f $(EXTDIR)/$(PLUGIN).so; \
+	  echo "install: FAILED, but the norns will still boot."; \
+	  exit 1; \
+	fi
 	@echo
 	@echo
 	@echo "Restart the audio engine for scsynth to pick it up (SYSTEM > RESET on"
