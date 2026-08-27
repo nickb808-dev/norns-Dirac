@@ -30,7 +30,7 @@ sc_cmds=$(sed -n '/One command per parameter/,/^	}/p' lib/Engine_Dirac.sc \
           | grep -oP '\\\K[a-zA-Z]+' | sort -u)
 
 # SynthDef arguments: everything between `arg` and the closing `;`.
-sc_args=$(sed -n '/SynthDef(\\dirac/,/playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;/p' lib/Engine_Dirac.sc \
+sc_args=$(sed -n '/synth = {/,/playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;/p' lib/Engine_Dirac.sc \
           | grep -oP '(?<![a-zA-Z\\])\b[a-zA-Z][a-zA-Z0-9]*(?=\s*=)' | sort -u)
 
 emptycheck() {

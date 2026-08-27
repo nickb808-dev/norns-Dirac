@@ -48,8 +48,20 @@ Engine_Dirac : CroneEngine {
 	prAlloc {
 		var srv = context.server;
 
-		SynthDef(\dirac, {
-			arg inbusl = 0, inbusr = 1, outbus = 0,
+		// Built as a FUNCTION-SYNTH via .play, not SynthDef + sync + Synth.new.
+		//
+		// This is the exact form of Engine_TestSine, which test/minimal/ proved
+		// makes sound on this device. The SynthDef form did not, and rather than
+		// keep guessing at which of its differences mattered - bus object vs
+		// .index, group placement, the sync - this adopts the shape that is known
+		// to work here and changes nothing else about the DSP.
+		//
+		// srv is still used: .play needs the SynthDef sent, and CroneEngine's
+		// Routine makes that safe.
+		srv.sync;
+
+		synth = {
+			arg out = 0, inbusl = 0, inbusr = 1,
 			    playhead = 0.0, speed = 0.0, rate = 3.0, grains = 12, grainlen = 0.05,
 			    posjtr = 0.0, revprob = 0.0, semishift = 0, voct = 0.0, psprd = 0.0,
 			    scale = 0, window = 0, texture = 0.5, tilt = 0.0, tiltspread = 0.0,
@@ -69,31 +81,18 @@ Engine_Dirac : CroneEngine {
 			// on rather than at a block boundary.
 			var fireAr = K2A.ar(fire);
 
-			Out.ar(outbus, Dirac.ar(src,
+			Out.ar(out, Dirac.ar(src,
 				playhead, rate, posjtr, spread, detune, level, revprob, psprd,
 				texture, grains, fireAr, hold, semishift, grainlen, mix, feedback,
 				compress, binaural, scale, voct, speed, heads, headspread,
 				headtune, snap, color, tilt, tiltspread, window,
 				playheadsOpt, diffuseOpt, freezeOpt));
-		}).add;
 
-		srv.sync;
-
-		synth = Synth.new(\dirac, [
+		}.play(args: [
+			\out,    context.out_b,
 			\inbusl, context.in_b[0].index,
-			\inbusr, context.in_b[1].index,
-			\outbus, context.out_b.index
-		], context.xg);
-
-		// NOTE: \addToHead, which is Synth.new's default and what
-		// Engine_TestSine gets from .play(target: context.xg).
-		//
-		// This was \addToTail, copied from Engine_Pappus without asking whether
-		// it suited. Pappus is a long chain that deliberately sits at the end;
-		// this is one synth. The tone-only control experiment (test/minimal/)
-		// makes sound on this device using the default placement, and the same
-		// SynthDef here did not using the tail - which makes group position the
-		// one variable that differs between a working engine and a silent one.
+			\inbusr, context.in_b[1].index
+		], target: context.xg);
 
 		// One command per parameter. tools/check-params.sh reads these symbols
 		// and compares them against lib/params.lua.
