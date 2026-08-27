@@ -117,6 +117,33 @@ reference64: hosttest64
 
 check: verify-vendor shimtest hosttest reference hosttest64 reference64
 
+# ── run this ON THE PI ────────────────────────────────────────────────────────
+# Everything in `check` except verify-vendor, which needs an upstream ER-301
+# checkout that will not exist on the target.
+#
+# This is the ARM question, asked on its own and with no SuperCollider in the
+# way: does the engine compute the same numbers on a 32-bit ARMv7 A72 with
+# gcc 10 as it does on x86-64 with a much newer compiler?
+#
+# It is worth answering BEFORE the UGen exists, because if the answer is no,
+# the wrapper cannot be what is wrong. refdiff.py grades the result — the
+# expected outcome is a small float-dialect difference, not bit-equality, and
+# the tolerances come from measurement (see tools/refdiff.py).
+portcheck: shimtest
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) $(HOSTINC) -DFRAMELENGTH=64 $(ENGINE) test/host/main.cpp -o build/t64
+	@echo "--- suites at FRAMELENGTH=64 (the block size norns runs) -------------"
+	@for s in $(HOSTSUITES); do printf '%-12s ' $$s; ./build/t64 $$s | tail -1; done
+	@./build/t64 asan >/dev/null && echo "asan         ok"
+	@echo
+	@echo "--- the cross-architecture diff --------------------------------------"
+	@./build/t64 ident /tmp/ident64-arm.bin >/dev/null
+	@python3 tools/refdiff.py /tmp/ident64-arm.bin $(REFERENCE64)
+	@echo
+	@echo "--- CPU on this machine ----------------------------------------------"
+	@printf 'ident render: '; \
+	 /usr/bin/time -f '%e s wall' ./build/t64 ident /dev/null 2>&1 | tail -1
+
 clean:
 	rm -rf build
 
@@ -129,3 +156,5 @@ help:
 	@echo "  make verify-vendor   UPSTREAM=../dirac"
 	@echo "  make reference       diff vs the canonical 128 render (ER-301 parity)"
 	@echo "  make reference64     diff vs the canonical 64 render (norns target)"
+	@echo "  make portcheck       RUN THIS ON THE PI — the ARM float question,"
+	@echo "                       with no SuperCollider involved"
