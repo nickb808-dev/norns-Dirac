@@ -31,7 +31,9 @@ Engine_Dirac : CroneEngine {
 	alloc {
 		try {
 			this.prAlloc;
-			"Engine_Dirac: loaded".postln;
+			"Engine_Dirac: loaded STAGE3 tone-only".postln;
+			synth.nodeID.postln;
+			context.out_b.index.postln;
 		} { arg err;
 			"### Engine_Dirac: alloc failed ###".postln;
 			err.reportError;
@@ -63,12 +65,26 @@ Engine_Dirac : CroneEngine {
 			// was sent on rather than at a block boundary.
 			var fireAr = K2A.ar(fire);
 
-			Out.ar(outbus, Dirac.ar(src,
-				playhead, rate, posjtr, spread, detune, level, revprob, psprd,
-				texture, grains, fireAr, hold, semishift, grainlen, mix, feedback,
-				compress, binaural, scale, voct, speed, heads, headspread,
-				headtune, snap, color, tilt, tiltspread, window,
-				playheadsOpt, diffuseOpt, freezeOpt));
+			// -- TEMPORARY DIAGNOSTIC - STAGE 3 - REMOVE ------------------
+			// Stage 2 sent a bare tone out of this synth, with Dirac computed but
+			// not summed. Result: silence. A plain SinOsc reaching Out.ar cannot
+			// itself be inaudible, so THE SYNTH IS NOT RUNNING - and since
+			// Dirac.ar was still instantiated in the graph, the likeliest reason
+			// is that constructing the Dirac UGen kills the synth (or the whole
+			// server), taking the tone with it.
+			//
+			// Stage 3 removes Dirac from the graph completely.
+			//   HEAR the tone -> the SynthDef, bus, group and levels are all
+			//                    correct, and Dirac_Ctor is what breaks it. That
+			//                    is C++ I can attack off-device.
+			//   SILENCE       -> the fault is in this file or in norns' routing,
+			//                    and has nothing to do with the port at all.
+			//
+			// src and fireAr are referenced so the args are not optimised away.
+			var unused = (src * 0) + (fireAr * 0);
+			var diagTone = SinOsc.ar(440, 0, 0.08);
+
+			Out.ar(outbus, [diagTone + unused, diagTone + unused]);
 		}).add;
 
 		srv.sync;
