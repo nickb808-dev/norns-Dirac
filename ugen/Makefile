@@ -51,7 +51,26 @@ LDFLAGS  := -shared
 
 EXTDIR := $(HOME)/.local/share/SuperCollider/Extensions/$(PLUGIN)
 
-.PHONY: all info install clean
+.PHONY: all info install verify clean
+
+# ── does the installed plugin actually LOAD? ─────────────────────────────────
+# The check that was missing, and its absence cost a working norns. A plugin
+# scsynth cannot dlopen stops the SERVER from booting - not just this UGen -
+# so norns shows SUPERCOLLIDER FAIL and no script runs at all. The error names
+# the server, so it reads like the norns broke rather than like a bad copy.
+#
+# Boots a throwaway server on a spare port, which is safe while norns is
+# running, and greps its output for a load failure naming this plugin.
+verify:
+	@out=$$(timeout 20 scsynth -u 57999 -i 2 -o 2 2>&1 | head -40); \
+	 if echo "$$out" | grep -qi "$(PLUGIN).so"; then \
+	   echo "verify: FAIL  scsynth cannot load the plugin:"; \
+	   echo "$$out" | grep -i "$(PLUGIN)" | sed 's/^/              /'; \
+	   echo "              REMOVE IT before rebooting, or the norns will not boot:"; \
+	   echo "              rm -f $(EXTDIR)/$(PLUGIN).so"; \
+	   exit 1; \
+	 fi; \
+	 echo "verify: OK    scsynth loaded $(PLUGIN).so without complaint"
 
 all: $(PLUGIN).so
 
@@ -63,7 +82,24 @@ $(PLUGIN).so: $(WRAPPER) $(ENGINE) $(SHIM) $(PLUGIN).sc.in
 	  exit 1; \
 	fi
 	@echo "building $(PLUGIN).so  (FRAMELENGTH=$(FRAMELENGTH), headers in $(SC_DIR))"
+	@rm -f $@
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(WRAPPER) $(ENGINE) $(SHIM)
+	@# A partial .so is not a build error - the link can be interrupted and
+	@# leave a short file that make then treats as up to date. scsynth reports
+	@# it as "file too short" and REFUSES TO BOOT, which takes the whole norns
+	@# down: no audio, no scripts, and an error that names the server rather
+	@# than this file. So check the artifact, not just the exit code.
+	@sz=$$(wc -c < $@); \
+	 if [ "$$sz" -lt 10000 ]; then \
+	   echo "build: FAIL  $@ is only $$sz bytes - truncated link."; \
+	   rm -f $@; exit 1; \
+	 fi; \
+	 if ! file $@ 2>/dev/null | grep -q 'shared object'; then \
+	   echo "build: FAIL  $@ is not an ELF shared object:"; \
+	   file $@ | sed 's/^/             /'; \
+	   rm -f $@; exit 1; \
+	 fi; \
+	 echo "build: OK    $@ is a $$sz-byte shared object"
 	@echo "OK: $@"
 	@file $@ 2>/dev/null || true
 
@@ -97,6 +133,12 @@ install: $(PLUGIN).so
 	   exit 1; \
 	 fi; \
 	 echo "install: OK    $(PLUGIN).so + $(PLUGIN).sc ($$b bytes) -> $(EXTDIR)"
+	@a=$$(wc -c < $(PLUGIN).so); b=$$(wc -c < $(EXTDIR)/$(PLUGIN).so); \
+	 if [ "$$a" != "$$b" ]; then \
+	   echo "install: FAIL  copied .so is $$b bytes, source is $$a"; \
+	   rm -f $(EXTDIR)/$(PLUGIN).so; exit 1; \
+	 fi
+	@$(MAKE) --no-print-directory verify
 	@echo
 	@echo
 	@echo "Restart the audio engine for scsynth to pick it up (SYSTEM > RESET on"
