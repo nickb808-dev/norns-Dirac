@@ -52,6 +52,18 @@ static od::Sample makeSample(std::vector<float> &store, int count, int nc)
     return s;
 }
 
+// Every block count in this harness was written for the ER-301's 128-sample
+// block. norns runs scsynth at 64 (probed: launched with no -z, and scsynth's
+// default is 64), so a raw block count renders HALF the audio there — which is
+// how windowt/tiltt/winbankt "failed" at 64: the 0.2 s grain under test was
+// simply cut off before its tail.
+//
+// nb() restates those counts as a DURATION. At FRAMELENGTH=128 it is the
+// identity, so the 128-sample reference render is unaffected by construction —
+// and that bit-diff is what guards this change.
+static constexpr int kRefBlock = 128;
+static inline int nb(int blocks128) { return blocks128 * kRefBlock / FRAMELENGTH; }
+
 static void run(Dirac &d, int blocks, FILE *fout, float *maxRDelta = nullptr, int *nonFinite = nullptr)
 {
     float prevR = 0.0f;
@@ -94,7 +106,7 @@ int main(int argc, char **argv)
                              {"GrainLen",0.08f},{"Mix",1.0f},{"Feedback",0.0f},
                              {"Compress",0.5f},{"Binaural",0.0f},{"Scale",2.0f},{"V/Oct",0.05f}};
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
-            run(d, 800, f);
+            run(d, nb(800), f);
             d.setSample(nullptr);
         }
         // B: live mode, feedback active
@@ -104,7 +116,7 @@ int main(int argc, char **argv)
                              {"Texture",0.8f},{"Grains",10.0f},{"GrainLen",0.05f},
                              {"Mix",0.7f},{"Feedback",0.8f},{"Binaural",0.4f}};
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
-            run(d, 800, f);
+            run(d, nb(800), f);
         }
         // C: sample mode, texture exactly at nodes 0.0 / 0.5 / 1.0
         for (float tex : {0.0f, 0.5f, 1.0f}) {
@@ -114,7 +126,7 @@ int main(int argc, char **argv)
             const Ctl c[] = {{"Playhead",0.5f},{"Rate",6.0f},{"Level",0.8f},{"Texture",tex},
                              {"Grains",16.0f},{"GrainLen",0.03f},{"Feedback",0.0f}};
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
-            run(d, 400, f);
+            run(d, nb(400), f);
             d.setSample(nullptr);
         }
         fclose(f);
@@ -137,9 +149,9 @@ int main(int argc, char **argv)
                              {"Binaural",1.0f},{"Detune",2.0f},{"Spread",1.0f},
                              {"Speed",4.0f}};
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
-            run(d, 3000, nullptr, nullptr, &nf);   // 3000 blocks = 8 s → grains complete + re-loop
+            run(d, nb(3000), nullptr, nullptr, &nf);   // 3000 blocks = 8 s → grains complete + re-loop
             d.setSample(nullptr);
-            run(d, 200, nullptr, nullptr, &nf);    // live-mode tail after detach
+            run(d, nb(200), nullptr, nullptr, &nf);    // live-mode tail after detach
         }
         // Live mode long-grain + feedback
         {
@@ -148,7 +160,7 @@ int main(int argc, char **argv)
                              {"Feedback",0.95f},{"SemiShift",-24.0f},{"Detune",2.0f},
                              {"Binaural",1.0f},{"Spread",1.0f},{"Hold",1.0f}};
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
-            run(d, 3000, nullptr, nullptr, &nf);
+            run(d, nb(3000), nullptr, nullptr, &nf);
         }
         // v0.2.2 torture: Color + Diffuse + sample-mode feedback + Snap +
         // Hold all at once, tiny sample, freeze toggled mid-flight,
@@ -163,12 +175,12 @@ int main(int argc, char **argv)
                              {"SemiShift",24.0f},{"Detune",2.0f},{"Binaural",1.0f},{"Spread",1.0f},
                              {"Hold",1.0f},{"Snap",1.0f},{"PosJtr",1.0f}};
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
-            run(d, 1500, nullptr, nullptr, &nf);
+            run(d, nb(1500), nullptr, nullptr, &nf);
             d.mFreezeOpt.set(2);                       // freeze mid-flight
-            run(d, 750, nullptr, nullptr, &nf);
+            run(d, nb(750), nullptr, nullptr, &nf);
             d.mFreezeOpt.set(1);
             d.setSample(nullptr);                      // detach with diffuser running
-            run(d, 750, nullptr, nullptr, &nf);
+            run(d, nb(750), nullptr, nullptr, &nf);
         }
         printf("asan done, nonFinite=%d\n", nf);
         return nf ? 1 : 0;
@@ -187,7 +199,7 @@ int main(int argc, char **argv)
                          {"GrainLen",1.0f},{"Detune",det},{"Spread",0.0f},{"Texture",1.0f}};
         setInputs(d, c, sizeof(c)/sizeof(c[0]));
         float maxRD = 0.0f; int nf = 0;
-        run(d, 2000, nullptr, &maxRD, &nf);
+        run(d, nb(2000), nullptr, &maxRD, &nf);
         printf("%s: R-channel max sample delta = %.5f (nonFinite=%d)\n", argv[2], maxRD, nf);
         return 0;
     }
@@ -208,7 +220,7 @@ int main(int argc, char **argv)
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
             // Histogram the position axis into the 12 columns a 12px-wide panel has.
             int hist[42] = {0}; int n = 0;
-            for (int b = 0; b < 400; ++b) {
+            for (int b = 0; b < nb(400); ++b) {
                 d.process();
                 for (int i = 0; i < dirac::Dirac::kMaxGrains; ++i) {
                     if (!d.isGrainActive(i)) continue;
@@ -237,7 +249,7 @@ int main(int argc, char **argv)
                        {"Heads",4.0f},{"HeadSpread",hs},{"HeadTune",1.0f},{"Snap",0.0f}};
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
             int hist[42] = {0}; int n = 0;
-            for (int b = 0; b < 400; ++b) {
+            for (int b = 0; b < nb(400); ++b) {
                 d.process();
                 for (int i = 0; i < dirac::Dirac::kMaxGrains; ++i) {
                     if (!d.isGrainActive(i)) continue;
@@ -276,7 +288,7 @@ int main(int argc, char **argv)
                 double sum[4]={0,0,0,0}; int cnt[4]={0,0,0,0};
                 int onsetHit[4]={-1,-1,-1,-1};
                 bool seen[dirac::Dirac::kMaxGrains]={false};
-                for (int b = 0; b < 300; ++b) {
+                for (int b = 0; b < nb(300); ++b) {
                     d.process();
                     for (int i = 0; i < dirac::Dirac::kMaxGrains; ++i) {
                         if (d.isGrainActive(i) && !seen[i]) {
@@ -321,7 +333,7 @@ int main(int argc, char **argv)
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
             double acc = 0.0; int n = 0;
             bool seen[dirac::Dirac::kMaxGrains] = {false};
-            for (int b = 0; b < 400; ++b) {
+            for (int b = 0; b < nb(400); ++b) {
                 d.process();
                 for (int i = 0; i < dirac::Dirac::kMaxGrains; ++i) {
                     if (d.isGrainActive(i) && !seen[i]) {
@@ -355,7 +367,7 @@ int main(int argc, char **argv)
                        {"Level",0.7f},{"Texture",0.5f},{"Color",pass?1.0f:0.0f}};
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
             double num = 0.0, den = 0.0; float prev = 0.0f;
-            for (int b = 0; b < 800; ++b) { d.process();
+            for (int b = 0; b < nb(800); ++b) { d.process();
                 float *L = d.mOutL.buffer();
                 for (int sIdx = 0; sIdx < FRAMELENGTH; ++sIdx) {
                     if (!std::isfinite(L[sIdx])) nf++;
@@ -389,7 +401,7 @@ int main(int argc, char **argv)
             // delays that energy into later blocks (first difft version missed
             // it in the dry pass and misread the smear as gain).
             double e = 0.0, et = 0.0, ett = 0.0; long t = 0;
-            for (int b = 0; b < 400; ++b) {
+            for (int b = 0; b < nb(400); ++b) {
                 Ctl fc[] = {{"Fire", (b == 0) ? 1.0f : 0.0f}};
                 setInputs(d, fc, 1);
                 d.process();
@@ -424,7 +436,7 @@ int main(int argc, char **argv)
             Ctl c[] = {{"Playhead",0.0f},{"Rate",6.0f},{"GrainLen",0.1f},{"Grains",12.0f},
                        {"Level",0.8f},{"Texture",0.5f},{"Mix",1.0f}};
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
-            for (int b = 0; b < 100; ++b) {             // fill the ring with tone
+            for (int b = 0; b < nb(100); ++b) {             // fill the ring with tone
                 for (int sIdx = 0; sIdx < FRAMELENGTH; ++sIdx)
                     d.mIn.buffer()[sIdx] = 0.5f * sinf(2.0f * 3.14159265f * 110.0f
                                             * (b * FRAMELENGTH + sIdx) / 48000.0f);
@@ -432,7 +444,7 @@ int main(int argc, char **argv)
             }
             if (pass) d.mFreezeOpt.set(2);
             double acc = 0.0; long n = 0;
-            for (int b = 0; b < 800; ++b) {             // input goes silent
+            for (int b = 0; b < nb(800); ++b) {             // input goes silent
                 for (int sIdx = 0; sIdx < FRAMELENGTH; ++sIdx) d.mIn.buffer()[sIdx] = 0.0f;
                 d.process();
                 float *L = d.mOutL.buffer();
@@ -466,7 +478,7 @@ int main(int argc, char **argv)
                        {"Level",0.9f},{"Texture",0.5f},{"Feedback",0.9f}};
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
             double acc = 0.0; long n = 0;
-            for (int b = 0; b < 600; ++b) {
+            for (int b = 0; b < nb(600); ++b) {
                 for (int sIdx = 0; sIdx < FRAMELENGTH; ++sIdx)
                     d.mIn.buffer()[sIdx] = 0.5f * sinf(2.0f * 3.14159265f * 330.0f
                                             * (b * FRAMELENGTH + sIdx) / 48000.0f);
@@ -488,10 +500,10 @@ int main(int argc, char **argv)
             Ctl c[] = {{"Playhead",0.05f},{"Rate",8.0f},{"GrainLen",0.15f},{"Grains",16.0f},
                        {"Level",0.9f},{"Texture",0.5f},{"Feedback",pass?0.9f:0.0f}};
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
-            for (int b = 0; b < 100; ++b) d.process();       // granulate the content
+            for (int b = 0; b < nb(100); ++b) d.process();       // granulate the content
             Ctl mv[] = {{"Playhead",0.6f}}; setInputs(d, mv, 1);  // park in silence
             double acc = 0.0; long n = 0;
-            for (int b = 0; b < 600; ++b) {
+            for (int b = 0; b < nb(600); ++b) {
                 d.process();
                 float *L = d.mOutL.buffer();
                 for (int sIdx = 0; sIdx < FRAMELENGTH; ++sIdx) {
@@ -525,7 +537,7 @@ int main(int argc, char **argv)
             setInputs(d, c, sizeof(c)/sizeof(c[0]));
             bool seenPitch[4] = {false,false,false,false};
             bool seen[dirac::Dirac::kMaxGrains] = {false};
-            for (int b = 0; b < 200; ++b) {
+            for (int b = 0; b < nb(200); ++b) {
                 d.process();
                 for (int i = 0; i < dirac::Dirac::kMaxGrains; ++i) {
                     if (d.isGrainActive(i) && !seen[i]) {
@@ -610,7 +622,7 @@ int main(int argc, char **argv)
             d.process();
             Ctl f0[] = {{"Fire",0.0f}}; setInputs(d, f0, 1);
             std::vector<float> env;
-            for (int b = 0; b < 80; ++b) {           // 0.2 s grain = 75 blocks
+            for (int b = 0; b < nb(80); ++b) {           // 0.2 s grain = 75 blocks
                 d.process();
                 const float *L = d.mOutL.buffer();
                 for (int sIdx = 0; sIdx < FRAMELENGTH; ++sIdx) {
@@ -674,7 +686,7 @@ int main(int argc, char **argv)
             d.process();
             Ctl f0[] = {{"Fire",0.0f}}; setInputs(d, f0, 1);
             std::vector<float> env;
-            for (int b = 0; b < 80; ++b) {
+            for (int b = 0; b < nb(80); ++b) {
                 d.process();
                 const float *L = d.mOutL.buffer();
                 for (int sIdx = 0; sIdx < FRAMELENGTH; ++sIdx) {
@@ -708,7 +720,7 @@ int main(int argc, char **argv)
                 d.process();
                 Ctl f0[] = {{"Fire",0.0f}}; setInputs(d, f0, 1);
                 std::vector<float> env;
-                for (int b = 0; b < 22; ++b) {          // 0.05 s grain + margin
+                for (int b = 0; b < nb(22); ++b) {          // 0.05 s grain + margin
                     d.process();
                     const float *L = d.mOutL.buffer();
                     for (int sIdx = 0; sIdx < FRAMELENGTH; ++sIdx) {
@@ -760,7 +772,7 @@ int main(int argc, char **argv)
             d.process();
             Ctl f0[] = {{"Fire",0.0f}}; setInputs(d, f0, 1);
             env.clear();
-            for (int b = 0; b < 80; ++b) {
+            for (int b = 0; b < nb(80); ++b) {
                 d.process();
                 const float *L = d.mOutL.buffer();
                 for (int sIdx = 0; sIdx < FRAMELENGTH; ++sIdx) {

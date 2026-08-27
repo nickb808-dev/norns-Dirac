@@ -62,29 +62,70 @@ verify-vendor:
 	  fi; \
 	done; exit $$fail
 
-# ── the cross-target reference ───────────────────────────────────────────────
-# test/reference/ident-v0.2.10.bin is `ident` rendered by the CANONICAL engine:
-# deterministic RNG seed, fixed control scenarios, sample mode and live mode.
+# ── the cross-target references ──────────────────────────────────────────────
+# `ident` rendered by the CANONICAL engine: deterministic RNG seed, fixed
+# control scenarios, sample mode and live mode.
 #
-# It is the acceptance test for Phase 1. When the UGen exists, render the same
-# scenarios through it in NRT on the Pi and diff against this file. "Sounds
-# right" is not an exit criterion; this is.
-REFERENCE := test/reference/ident-v0.2.10.bin
+# THERE ARE TWO, because block size is not a free parameter here. Grain spawn
+# decisions are made once per block and each spawn consumes the RNG, so a
+# 64-sample build and a 128-sample build diverge into completely different
+# grain clouds — measured: 7.8% of samples match, rms difference 0.30. The
+# statistics are identical (every suite passes at both sizes with the same
+# numbers) but the waveforms are unrelated. A cross-block-size bit-diff is
+# therefore meaningless, and comparing against the wrong one would look like a
+# catastrophic port bug.
+#
+#   ident-v0.2.10.bin       FRAMELENGTH=128 — parity with the ER-301
+#   ident-v0.2.10-fl64.bin  FRAMELENGTH=64  — THE PHASE 1 ACCEPTANCE TARGET,
+#                                             because norns runs scsynth at 64
+#                                             (probed 2026-08-27: launched with
+#                                             no -z; scsynth's default is 64)
+#
+# When the UGen exists, render the same scenarios through it in NRT on the Pi
+# at 64 and diff against the fl64 file. "Sounds right" is not an exit
+# criterion; this is.
+REFERENCE   := test/reference/ident-v0.2.10.bin
+REFERENCE64 := test/reference/ident-v0.2.10-fl64.bin
 
 reference: hosttest
 	@mkdir -p test/reference
 	./build/t ident /tmp/ident-now.bin
 	@if cmp -s /tmp/ident-now.bin $(REFERENCE); then 	  echo "reference: OK — this build renders the canonical output bit-for-bit"; 	else 	  echo "reference: FAIL — output drifted from $(REFERENCE)."; 	  echo "           Either the engine was edited here (it must not be —"; 	  echo "           see ENGINE-PROVENANCE.md) or the toolchain changed."; 	  exit 1; 	fi
 
-check: verify-vendor shimtest hosttest reference
+# ── the same harness at the block size norns actually runs ───────────────────
+# Guards two things at once: that the engine behaves at 64 (it does — every
+# suite reports the same statistics), and that no block count in the harness is
+# secretly a duration. Three suites DID fail here before nb() was introduced,
+# for that exact reason: they rendered 80 blocks for a 0.2 s grain and at 64
+# that cut the grain off before its tail.
+hosttest64:
+	@mkdir -p build
+	$(CXX) $(CXXFLAGS) $(HOSTINC) -DFRAMELENGTH=64 $(ENGINE) test/host/main.cpp -o build/t64
+	@for s in $(HOSTSUITES); do printf '%-12s ' $$s; ./build/t64 $$s | tail -1; done
+	@./build/t64 asan >/dev/null && echo "asan        ok"
+	@echo ">>> hosttest64: all suites reported above (FRAMELENGTH=64)"
+
+reference64: hosttest64
+	@mkdir -p test/reference
+	./build/t64 ident /tmp/ident64-now.bin
+	@if cmp -s /tmp/ident64-now.bin $(REFERENCE64); then \
+	  echo "reference64: OK — 64-sample build matches the norns acceptance target"; \
+	else \
+	  echo "reference64: FAIL — output drifted from $(REFERENCE64)."; \
+	  exit 1; \
+	fi
+
+check: verify-vendor shimtest hosttest reference hosttest64 reference64
 
 clean:
 	rm -rf build
 
 help:
 	@echo "norns-dirac $(VERSION) — Phase 0"
-	@echo "  make check           verify-vendor + shimtest + hosttest"
-	@echo "  make hosttest        the 17-suite ported ER-301 harness"
+	@echo "  make check           all six gates"
+	@echo "  make hosttest        the ported ER-301 harness at FRAMELENGTH=128"
+	@echo "  make hosttest64      the same harness at 64 — what norns runs"
 	@echo "  make shimtest        compile the engine against norns/od/"
 	@echo "  make verify-vendor   UPSTREAM=../dirac"
-	@echo "  make reference       diff this build against the canonical render"
+	@echo "  make reference       diff vs the canonical 128 render (ER-301 parity)"
+	@echo "  make reference64     diff vs the canonical 64 render (norns target)"
