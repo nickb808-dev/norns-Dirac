@@ -49,6 +49,13 @@ if [ -n "$LUAC" ]; then
     for g in $($LUAC -p -l dirac.lua | grep -oE 'SETTABUP.*_ENV "[A-Za-z_0-9]+"' | grep -oE '"[^"]+"' | tr -d '"' | sort -u); do
         case "$allowed_w" in *" $g "*) ;; *) bad="$bad write:$g";; esac
     done
+    # lib/splash.lua: a module; it may READ norns globals and write none.
+    for g in $($LUAC -p -l lib/splash.lua | grep -oE 'GETTABUP.*_ENV "[A-Za-z_0-9]+"' | grep -oE '"[^"]+"' | tr -d '"' | sort -u); do
+        case "$allowed_r" in *" $g "*) ;; *) bad="$bad splash-read:$g";; esac
+    done
+    for g in $($LUAC -p -l lib/splash.lua | grep -oE 'SETTABUP.*_ENV "[A-Za-z_0-9]+"' | grep -oE '"[^"]+"' | tr -d '"' | sort -u); do
+        bad="$bad splash-write:$g"
+    done
     if [ -n "$bad" ]; then
         echo "check-lua: FAIL  dirac.lua touches unexpected globals:$bad"
         echo "                 (a local used before its declaration reads a nil global)"

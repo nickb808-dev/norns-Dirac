@@ -26,6 +26,7 @@ local fileselect = require "fileselect"
 -- Relative to this script's own folder, so the install folder can be named
 -- anything (it is `dirac` on the device; the repo is `norns-dirac`).
 local SPEC = include("lib/params")
+local splash = include("lib/splash")
 
 -- ── engine calls that cannot brick init() ────────────────────────────────────
 -- Calling engine.<id>(x) directly kills init() if the engine is not loaded, and
@@ -97,6 +98,7 @@ local page = 1
 -- K1 reaches the script only once held past 0.25 s (a shorter tap toggles the
 -- norns menu and never arrives), so K1 is a pure modifier here.
 local k1_held = false
+local swallow_release = nil              -- the key whose press skipped the title
 local k2_down, k2_used = false, false   -- K2: tap = hold toggle; held = fine
 local view_stereo = false                -- field x: position (false) / pan
 local fire_flash = 0                     -- frames left of the "fire" flash
@@ -193,6 +195,8 @@ local SCRIPT_ACTION = {
 
 -- ── init ─────────────────────────────────────────────────────────────────────
 function init()
+  -- the title card covers the engine load; any key or encoder skips it
+  splash.start()
   for _, p in ipairs(SPEC) do
     local kind = p.kind or "control"
     KIND[p.id] = kind
@@ -337,6 +341,7 @@ local function adjust(id, d)
 end
 
 function enc(n, d)
+  if splash.active() then splash.skip(); return end
   if n == 1 then
     page = util.clamp(page + d, 1, #PAGES)
   else
@@ -346,6 +351,12 @@ function enc(n, d)
 end
 
 function key(n, z)
+  -- a press skips the title; its release must not act either
+  if splash.active() then
+    if z == 1 then splash.skip(); swallow_release = n end
+    return
+  end
+  if swallow_release == n and z == 0 then swallow_release = nil; return end
   if n == 1 then
     k1_held = (z == 1)
   elseif n == 2 then
@@ -575,6 +586,7 @@ local function draw_param(x, id)
 end
 
 function redraw()
+  if splash.active() then splash.draw(); return end
   screen.clear()
   screen.aa(0)
   screen.font_face(1)
