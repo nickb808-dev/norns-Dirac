@@ -99,6 +99,13 @@ local page = 1
 -- norns menu and never arrives), so K1 is a pure modifier here.
 local k1_held = false
 local swallow_release = nil              -- the key whose press skipped the title
+-- True while norns' file browser is open. fileselect swaps out enc/key, but
+-- in play mode norns.menu.init() hands `redraw` straight back to the script,
+-- so the 30 fps redraw clock painted over the browser every frame (and a
+-- second open saved the browser's own handlers as "the script's", leaving
+-- the encoders stuck in a browser nobody could see). redraw() draws nothing
+-- while this is set, and a second open is ignored.
+local browsing = false
 local k2_down, k2_used = false, false   -- K2: tap = hold toggle; held = fine
 local view_stereo = false                -- field x: position (false) / pan
 local fire_flash = 0                     -- frames left of the "fire" flash
@@ -317,10 +324,12 @@ local function adjust(id, d)
   if not id then return end                 -- an empty slot on a page
   local kind = KIND[id]
   if kind == "file" then
-    -- fileselect takes over redraw/enc/key until a file is chosen or K2
-    -- cancels, then hands them back
-    if d > 0 then
+    -- fileselect takes over enc/key until a file is chosen or K2 cancels,
+    -- then hands them back. Either direction opens it.
+    if not browsing then
+      browsing = true
       fileselect.enter(_path.audio, function(path)
+        browsing = false
         if path and path ~= "cancel" then params:set(id, path) end
       end)
     end
@@ -586,6 +595,7 @@ local function draw_param(x, id)
 end
 
 function redraw()
+  if browsing then return end              -- the file browser owns the screen
   if splash.active() then splash.draw(); return end
   screen.clear()
   screen.aa(0)

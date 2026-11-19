@@ -5,6 +5,8 @@
 -- type), drawn as strokes, over a perspective grid floor that scrolls toward
 -- the viewer and a striped wireframe sun on the horizon.
 --
+-- Credit: (c) 2026 nickb808.
+--
 -- Shown as the script starts (~3 s); any key or encoder skips it.
 
 local M = {}
@@ -166,7 +168,7 @@ function M.draw(t)
     screen.level(13); screen.move(64, 48); screen.text_center("PUSH ANY KEY")
   end
 
-  local credit = "2026 NICHOLAS BREINICH"
+  local credit = "2026 nickb808"
   local w = screen.text_extents(credit)
   local cx = math.floor(64 - (w + 7) / 2)
   screen.level(0); screen.rect(cx - 3, 55, w + 13, 9); screen.fill()
