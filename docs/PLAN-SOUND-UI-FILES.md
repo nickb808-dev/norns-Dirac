@@ -229,7 +229,12 @@ without extra code.
    grains at ~30 Hz and live-ring peaks at ~4 Hz via SendNodeReply -> sclang ->
    matron OSC. Waveform peaks are the input as written, not the ring with
    feedback; that needs C2's getter. matron 5.5% CPU, no xruns.)*
-6. **C1** load, then **C2** capture via the upstream getter.
+6. **C1** load, then **C2** capture via the upstream getter. *(C1 done 2026-11-18: file page
+   (source live/sample, sample, clear); norns file browser on E3; non-48 kHz
+   files converted once by sox into ~/dust/audio/dirac/.cache; UGen buffer
+   input with a per-block SndBuf refresh; the old buffer freed only after the
+   synth has moved; sample peaks from the file in sclang. Verified on the
+   device with a 48 kHz mono drum and a 44.1 kHz stereo 79 s file.)*
 7. **A2** only if you want to compare characters.
 
 ## Decisions

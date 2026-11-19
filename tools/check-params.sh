@@ -25,7 +25,10 @@ fail=0
 
 # Every kind (control, option, toggle, trigger) lives in lib/params.lua, the
 # three od::Option menus included, so one extraction covers them all.
-lua_ids=$(pgrep_o '^\s*\{\s*id\s*=\s*"\K[a-zA-Z]+' lib/params.lua | sort -u)
+# `script = true` params are handled by dirac.lua itself (a file path, an
+# unload action), not by an engine command of the same name.
+lua_ids=$(grep -v 'script\s*=\s*true' lib/params.lua \
+          | pgrep_o '^\s*\{\s*id\s*=\s*"\K[a-zA-Z]+' | sort -u)
 
 # addCommand names come from the two symbol lists, not from a literal string,
 # so extract the symbols inside the two .do { } blocks.
@@ -105,6 +108,23 @@ if command -v lua >/dev/null 2>&1; then
     lua tools/check-pages.lua || fail=1
 else
     echo "check-params: SKIP  pages check (no lua interpreter)"
+fi
+
+# ── 6. no command may shadow matron's engine-table functions ────────────────
+# engine.<name> resolves to norns' OWN function first for these names, so a
+# command called e.g. "load" is unreachable: engine.load(path) asks norns to
+# load an engine called <path>. That happened (sample loading, 2026-11-18).
+reserved="add_command commands is_loading list_commands load name names register register_commands"
+all_cmds=$( { echo "$sc_cmds"; pgrep_o 'addCommand\("\K[a-zA-Z_]+' lib/Engine_Dirac.sc; } | sort -u)
+clash=""
+for c in $all_cmds; do
+    for r in $reserved; do [ "$c" = "$r" ] && clash="$clash $c"; done
+done
+if [ -n "$clash" ]; then
+    echo "check-params: FAIL  commands shadow norns engine functions:$clash"
+    fail=1
+else
+    echo "check-params: OK    no command shadows a norns engine-table function"
 fi
 
 exit $fail

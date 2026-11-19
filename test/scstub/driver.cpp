@@ -79,6 +79,9 @@ struct Host {
     // derived size — the same trick scsynth's DefineDtorUnit performs.
     std::vector<char>     storage;
     Graph                 graph{{1234}};
+    // Server buffers for sample mode. Empty unless a test adds some.
+    std::vector<SndBuf>   sndbufs;
+    World                 world{0, nullptr};
 
     void build(int blockLen, bool fireAudioRate = true)
     {
@@ -97,6 +100,7 @@ struct Host {
             inPtrs[i]    = inBufs[i].data();
             inputPtrs[i] = &inputSpecs[i];
         }
+        inBufs[kBuf][0] = -1.0f;   // live unless a test says otherwise
         for (int c = 0; c < 2; ++c) {
             outBufs[c].assign(blockLen, 0.0f);
             outPtrs[c] = outBufs[c].data();
@@ -105,7 +109,9 @@ struct Host {
         rate.mBufLength  = blockLen;
 
         Dirac *du = reinterpret_cast<Dirac *>(storage.data());
-        du->mWorld      = nullptr;
+        world.mNumSndBufs = uint32(sndbufs.size());
+        world.mSndBufs    = sndbufs.empty() ? nullptr : sndbufs.data();
+        du->mWorld      = &world;
         du->mParent     = &graph;
         du->mNumInputs  = kNumInputs;
         du->mNumOutputs = 2;
@@ -573,6 +579,85 @@ int main()
                  vizHz, active, counted, waveHz, pmin, pmax, ringOk ? "131072 ok" : "SIZE MISMATCH");
         const bool rates = vizHz > 25 && vizHz < 35 && waveHz > 13 && waveHz < 17;
         report("viz", vizOk && countOk && waveOk && ringOk && rates && gOtherReplies == 0, d);
+    }
+
+    // 10. sample mode through a server buffer. The wrapper must hand the
+    //     engine exactly what a direct setSample() would: a stereo, interleaved
+    //     buffer renders bit-identically to the bare engine given the same
+    //     od::Sample. Then: back to live on bufnum -1, on an out-of-range
+    //     bufnum, and on an unallocated buffer - never a crash, never a stale
+    //     pointer.
+    {
+        const int frames = 48000;
+        std::vector<float> data(size_t(frames) * 2);
+        for (int i = 0; i < frames; ++i) {
+            data[size_t(i) * 2]     = 0.5f * sinf(2.0f * 3.14159265f * 220.0f * i / 48000.0f);
+            data[size_t(i) * 2 + 1] = 0.3f * sinf(2.0f * 3.14159265f * 330.0f * i / 48000.0f);
+        }
+        const CtlVal sctl[] = { {kPlayhead,0.3f,"Playhead"}, {kRate,6.0f,"Rate"}, {kGrainLen,0.08f,"GrainLen"},
+                                {kGrains,12.0f,"Grains"}, {kLevel,0.8f,"Level"}, {kTexture,0.5f,"Texture"},
+                                {kSpeed,0.5f,"Speed"}, {kSpread,0.6f,"Spread"}, {kMix,1.0f,"Mix"} };
+        const int nS = sizeof(sctl) / sizeof(sctl[0]);
+        const int blocks = 400;
+
+        // bare engine, setSample directly
+        std::vector<float> bL, bR;
+        {
+            dirac::Dirac d;
+            od::Sample smp; smp.mpData = data.data(); smp.mChannelCount = 2; smp.mSampleCount = frames;
+            d.setSample(&smp);
+            std::vector<std::vector<float>> bufs(kNumInlets, std::vector<float>(FRAMELENGTH, 0.0f));
+            for (int i = 0; i < nS; ++i) for (auto &x : bufs[sctl[i].idx]) x = sctl[i].v;
+            d.mMultiHeadOpt.set(1); d.mDiffuseOpt.set(1); d.mFreezeOpt.set(1);
+            std::vector<float> oL(FRAMELENGTH), oR(FRAMELENGTH);
+            for (int b = 0; b < blocks; ++b) {
+                for (int i = 0; i < kNumInlets; ++i) setEnginePort(&d, i, bufs[i].data());
+                d.mOutL.point(oL.data()); d.mOutR.point(oR.data());
+                d.process();
+                bL.insert(bL.end(), oL.begin(), oL.end()); bR.insert(bR.end(), oR.begin(), oR.end());
+            }
+        }
+
+        // wrapped, through buffer 1 of 2 (buffer 0 unallocated)
+        Host h;
+        SndBuf empty{}; SndBuf full{};
+        full.samplerate = 48000.0; full.data = data.data(); full.channels = 2;
+        full.frames = frames; full.samples = frames * 2;
+        h.sndbufs = { empty, full };
+        h.build(FRAMELENGTH); h.ctor();
+        for (int i = 0; i < nS; ++i) h.set(sctl[i].idx, sctl[i].v);
+        h.set(kOptPlayheads, 1.0f); h.set(kOptDiffuse, 1.0f); h.set(kOptFreeze, 1.0f);
+        h.set(kBuf, 1.0f);
+        std::vector<float> wL, wR;
+        for (int b = 0; b < blocks; ++b) {
+            h.run(FRAMELENGTH);
+            wL.insert(wL.end(), h.outBufs[0].begin(), h.outBufs[0].end());
+            wR.insert(wR.end(), h.outBufs[1].begin(), h.outBufs[1].end());
+        }
+        double md = 0, md2 = 0;
+        const bool same_out = same(bL, wL, &md) && same(bR, wR, &md2);
+        bool nonzero = false; for (float v : wL) if (v != 0.0f) { nonzero = true; break; }
+        const bool wasSample = h.unit()->engine->isSampleMode();
+        const float srcLen = gViz.last.size() > 6 ? gViz.last[6] : -1.0f;
+
+        h.set(kBuf, -1.0f); h.run(FRAMELENGTH);
+        const bool liveOnMinus = !h.unit()->engine->isSampleMode();
+        h.set(kBuf, 1.0f);  h.run(FRAMELENGTH);
+        const bool reattached = h.unit()->engine->isSampleMode();
+        h.set(kBuf, 7.0f);  h.run(FRAMELENGTH);          // out of range
+        const bool liveOnRange = !h.unit()->engine->isSampleMode();
+        h.set(kBuf, 0.0f);  h.run(FRAMELENGTH);          // unallocated
+        const bool liveOnEmpty = !h.unit()->engine->isSampleMode();
+        h.dtor();
+
+        char d[256];
+        snprintf(d, sizeof d, "stereo buffer = bare setSample (max|diff| %.3g/%.3g)%s; viz srcLen %.0f; "
+                 "live on -1 %s, reattach %s, bad bufnum %s, empty buf %s",
+                 md, md2, nonzero ? "" : " SILENT", srcLen,
+                 liveOnMinus ? "ok" : "NO", reattached ? "ok" : "NO",
+                 liveOnRange ? "ok" : "NO", liveOnEmpty ? "ok" : "NO");
+        report("sample", same_out && nonzero && wasSample && srcLen == float(frames)
+               && liveOnMinus && reattached && liveOnRange && liveOnEmpty, d);
     }
 
     printf("%s\n", gFails ? "FAILED" : ">>> Dirac: all wiring tests passed");

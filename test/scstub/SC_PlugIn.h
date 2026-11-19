@@ -20,11 +20,25 @@
 
 enum { calc_ScalarRate = 0, calc_BufRate = 1, calc_FullRate = 2 };
 
-struct World;
+typedef unsigned int uint32;
+// The fields DiracUGen reads, in the real layout's order (SC_SndBuf.h,
+// SC_World.h). Sample mode reads data/channels/frames of a global buffer.
+struct SndBuf {
+    double samplerate;
+    double sampledur;
+    float *data;
+    int    channels;
+    int    samples;
+    int    frames;
+};
+struct World {
+    uint32  mNumSndBufs;
+    SndBuf *mSndBufs;
+};
+#define LOCK_SNDBUF_SHARED(buf)
 struct Unit;
 typedef void (*UnitCalcFunc)(struct Unit *unit, int inNumSamples);
 
-struct SndBuf;
 
 struct Rate {
     double mSampleRate;

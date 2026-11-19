@@ -34,6 +34,9 @@ Engine_Dirac : CroneEngine {
 	var <meter;
 	// Display data from the UGen (SendNodeReply), forwarded to matron.
 	var <vizFwd, <waveFwd, <matron;
+	// Sample mode: the buffer the synth is reading, and a generation count so
+	// a slow peak scan of an old file cannot overwrite a newer one's.
+	var <sampleBuf, loadGen = 0;
 	var <inAmp = 0, <outAmp = 0;
 
 	*new { arg context, doneCallback;
@@ -74,7 +77,8 @@ Engine_Dirac : CroneEngine {
 			    heads = 1, headspread = 0.0, headtune = 0, snap = 0.0,
 			    compress = 0.0, spread = 0.5, detune = 0.0, binaural = 0.0,
 			    mix = 1.0, feedback = 0.0, level = 0.7, fire = 0.0, hold = 0.0,
-			    playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;
+			    playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1,
+			    source = 1, buf = -1;
 
 			// The engine's input is MONO - one od::Inlet. insrc picks how the
 			// pair becomes one channel:
@@ -103,7 +107,11 @@ Engine_Dirac : CroneEngine {
 				texture, grains, fireAr, hold, semishift, grainlen, mix, feedback,
 				compress, binaural, scale, voct, speed, heads, headspread,
 				headtune, snap, tilt, tiltspread, window,
-				playheadsOpt, diffuseOpt, freezeOpt);
+				playheadsOpt, diffuseOpt, freezeOpt,
+				// source 1 = live, 2 = sample. A sample that is selected but
+				// not loaded (buf -1) is live too: the UGen treats any invalid
+				// buffer as live.
+				Select.kr(source > 1.5, [-1, buf]));
 
 			// METERS, and the reason they are worth the two UGens.
 			//
@@ -158,8 +166,17 @@ Engine_Dirac : CroneEngine {
 
 		// One command per parameter. tools/check-params.sh reads these symbols
 		// and compares them against lib/params.lua.
+		// Sample mode. Not params: these carry a path and a lifecycle, not a
+		// value (dirac.lua's `sample` file param drives them).
+		// NOT "load"/"unload": matron's engine table already has engine.load
+		// (load an engine by name), so engine.load(path) never reached here -
+		// norns tried to load an engine called "<path>". check-params.sh now
+		// rejects any command named after an engine-table function.
+		this.addCommand("loadsample", "s", { arg msg; this.loadSample(msg[1].asString); });
+		this.addCommand("clearsample", "", { this.unloadSample; });
+
 		[
-			\ingain, \insrc,
+			\ingain, \insrc, \source,
 			\playhead, \speed, \rate, \grains, \grainlen, \posjtr, \revprob,
 			\semishift, \voct, \psprd, \scale, \window, \texture, \tilt,
 			\tiltspread, \heads, \headspread, \headtune, \snap,
@@ -177,8 +194,72 @@ Engine_Dirac : CroneEngine {
 		};
 	}
 
+	// Read a file into a NEW buffer, point the synth at it, and only then free
+	// the old one. The UGen re-reads the buffer every block, so the swap is
+	// clean as soon as the synth has moved; 0.25 s is many blocks of margin.
+	// The file must already be 48 kHz (dirac.lua converts with sox): the engine
+	// assumes 48 kHz, and a 44.1 kHz file would play 9% sharp.
+	loadSample { arg path;
+		var gen;
+		loadGen = loadGen + 1;
+		gen = loadGen;
+		Buffer.read(context.server, path, action: { arg b;
+			if (b.numFrames.isNil or: { b.numFrames < 2 }) {
+				("Engine_Dirac: could not read " ++ path).postln;
+				b.free;
+				matron.sendMsg('/dirac/load_fail', path);
+			} {
+				var old = sampleBuf;
+				sampleBuf = b;
+				synth.set(\buf, b.bufnum);
+				if (old.notNil) { SystemClock.sched(0.25, { old.free; nil }) };
+				("Engine_Dirac: loaded " ++ path ++ " (" ++ b.numFrames ++ " frames, "
+					++ b.numChannels ++ " ch)").postln;
+				matron.sendMsg('/dirac/loaded', path, b.numFrames, b.numChannels);
+				this.sendPeaks(path, gen);
+			};
+		});
+	}
+
+	unloadSample {
+		var old = sampleBuf;
+		loadGen = loadGen + 1;
+		sampleBuf = nil;
+		synth.set(\buf, -1);
+		if (old.notNil) { SystemClock.sched(0.25, { old.free; nil }) };
+		matron.sendMsg('/dirac/unloaded');
+	}
+
+	// 128 waveform peaks for the field, read from the FILE rather than the
+	// server buffer (no server round trip). One bin at a time, yielding
+	// between bins so a long file never stalls sclang's handling of engine
+	// commands. FloatArray abs/maxItem are primitives: fast even for minutes
+	// of audio.
+	sendPeaks { arg path, gen;
+		fork {
+			var sf = SoundFile.new, bins = 128, peaks;
+			if (sf.openRead(path)) {
+				var nf = sf.numFrames, nc = sf.numChannels;
+				var per = (nf / bins).ceil.asInteger.max(1);
+				peaks = Array.fill(bins, { arg i;
+					var n = per.min(nf - (i * per)).max(0), p = 0;
+					if (n > 0) {
+						var data = FloatArray.newClear(n * nc);
+						sf.readData(data);
+						p = data.abs.maxItem ? 0;
+					};
+					0.wait;
+					p
+				});
+				sf.close;
+				if (gen == loadGen) { matron.sendMsg('/dirac/samplewave', *peaks) };
+			};
+		};
+	}
+
 	free {
 		meter.free;
+		if (sampleBuf.notNil) { sampleBuf.free; sampleBuf = nil };
 		vizFwd.free;
 		waveFwd.free;
 		synth.free;

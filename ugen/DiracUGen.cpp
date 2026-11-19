@@ -65,6 +65,9 @@ enum {
     // Menu options. Ints, 1-based, matching od::OptionControl on the device —
     // the engine compares against literal 1/2/3, so 0 is not a valid value.
     kOptPlayheads = kNumInlets, kOptDiffuse, kOptFreeze,
+    // Sample mode: a server buffer number, or < 0 for live. Not an engine
+    // inlet - the wrapper turns it into setSample() (see "sample mode" below).
+    kBuf,
     kNumInputs
 };
 
@@ -134,6 +137,12 @@ struct Dirac : public Unit {
     float         binPeak;                   // the bin being written, until it completes
     float         vizMsg[kVizHeader + dirac::Dirac::kMaxGrains * kVizPerGrain];
     float         waveMsg[1 + kWaveBins];
+
+    // Sample mode. The engine borrows an od::Sample; this one is refilled
+    // from the server's SndBuf every block (see Dirac_next).
+    od::Sample    sample;
+    bool          attached;
+    int           attachedFrames;
 };
 
 static void Dirac_next(Dirac *unit, int inNumSamples);
@@ -192,6 +201,9 @@ void Dirac_Ctor(Dirac *unit)
     unit->waveCountdown = unit->waveEvery;
     memset(unit->peaks, 0, sizeof(unit->peaks));
     unit->binPeak = 0.0f;
+    unit->sample = od::Sample();
+    unit->attached = false;
+    unit->attachedFrames = 0;
 
     // (3) above. A mismatch here is the single most likely cause of a render
     // that diverges wildly rather than subtly, so say so in words: a silent
@@ -293,6 +305,44 @@ void Dirac_next(Dirac *unit, int inNumSamples)
             // Read as buffer()[0] only — verified against the engine source —
             // so a 1-float control wire is exactly enough.
             p->point(const_cast<float *>(IN(i)));
+        }
+    }
+
+    // ── sample mode ──────────────────────────────────────────────────────────
+    // The buffer is the server's: sclang allocates, fills and frees it. So the
+    // od::Sample is rebuilt from the SndBuf EVERY block, before process(), and
+    // never trusted across blocks. That is what makes buffer changes safe:
+    // b_allocRead / b_free swap a SndBuf's data between RT blocks and free the
+    // old memory afterwards, so a pointer read here is current for this block.
+    // (Engine_Dirac still frees a replaced buffer only after the synth has
+    // moved to the new one.) Only global buffers; anything invalid - out of
+    // range, unallocated, empty - means live.
+    {
+        od::Sample *want = nullptr;
+        const float fb = IN0(kBuf);
+        World *w = unit->mWorld;
+        if (fb >= 0.0f && w) {
+            const uint32 bn = uint32(fb);
+            if (bn < w->mNumSndBufs) {
+                SndBuf *buf = w->mSndBufs + bn;
+                LOCK_SNDBUF_SHARED(buf);   // no-op on scsynth; supernova would need it held through process()
+                if (buf->data && buf->frames > 1 && buf->channels > 0) {
+                    unit->sample.mpData        = buf->data;
+                    unit->sample.mChannelCount = buf->channels;
+                    unit->sample.mSampleCount  = size_t(buf->frames);
+                    want = &unit->sample;
+                }
+            }
+        }
+        // setSample() only on a change of state or length: it resets the
+        // engine's end index. The data pointer is re-read by the engine every
+        // block, so refreshing the struct above is enough otherwise.
+        const bool wantAttached = (want != nullptr);
+        const int  wantFrames   = want ? int(want->mSampleCount) : 0;
+        if (wantAttached != unit->attached || wantFrames != unit->attachedFrames) {
+            d->setSample(want);
+            unit->attached = wantAttached;
+            unit->attachedFrames = wantFrames;
         }
     }
 

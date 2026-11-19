@@ -37,6 +37,10 @@
 -- toggle:   on/off; the engine receives 0 or 1. For controls the engine reads
 --           as a gate (`> 0.5`), where a 0–1 dial only pretended to be more.
 -- trigger:  a momentary action; dirac.lua sends 1 then 0.
+-- file:     a path chosen in the norns file browser.
+--
+-- script = true marks a param the SCRIPT handles itself rather than sending
+-- to an engine command of the same id (check-params.sh skips these).
 return {
   -- ── input (norns-side; not an ER-301 control) ───────────────────────────
   -- The ER-301 sees ±1.0 = ±10 V; a norns line input arrives at whatever the
@@ -47,6 +51,12 @@ return {
   -- alone fixes the common case of a mono cable in one jack, which the
   -- average would drop by 6 dB.
   { id = "insrc",      name = "input",       kind = "option", options = { "L+R", "L", "R" }, base = 1, default = 1 },
+
+  -- ── source: live input or a loaded sample ─────────────────────────────────
+  { id = "source",     name = "source",      kind = "option", options = { "live", "sample" }, base = 1, default = 1 },
+  -- dirac.lua converts non-48 kHz files with sox, then calls engine.load().
+  { id = "sample",     name = "sample",      kind = "file", script = true },
+  { id = "unload",     name = "clear sample",kind = "trigger", script = true },
 
   -- ── source position ───────────────────────────────────────────────────────
   { id = "playhead",   name = "playhead",    min = 0.0,   max = 1.0,  default = 0.0  },

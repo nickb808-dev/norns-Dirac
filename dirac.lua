@@ -11,10 +11,15 @@
 -- K1 held + K2: field x =
 --   position / stereo
 --
+-- file page: E3 on sample
+-- opens the file browser
+--
 -- every param is also in
 -- the PARAMS menu
 
 engine.name = "Dirac"
+
+local fileselect = require "fileselect"
 
 -- Relative to this script's own folder, so the install folder can be named
 -- anything (it is `dirac` on the device; the repo is `norns-dirac`).
@@ -60,6 +65,11 @@ local function formatter_for(p, quantum)
 end
 
 local KIND = {}   -- id -> kind, from SPEC
+
+local note, note_frames = nil, 0         -- one-line transient message
+local function flash(msg)
+  note, note_frames = msg, 40
+end
 local OPTS = {}   -- id -> option labels, for on/off detection
 
 -- ── pages ────────────────────────────────────────────────────────────────────
@@ -77,6 +87,7 @@ local PAGES = {
   { name = "space", main = { "spread", "binaural" },      alt = { "detune", "diffuseOpt" } },
   { name = "regen", main = { "feedback", "compress" },    alt = { "freezeOpt", "hold" } },
   { name = "out",   main = { "mix", "level" },            alt = { "insrc", "ingain" } },
+  { name = "file",  main = { "source", "sample" },        alt = { "unload" } },
 }
 local page = 1
 
@@ -87,13 +98,15 @@ local k1_held = false
 local k2_down, k2_used = false, false   -- K2: tap = hold toggle; held = fine
 local view_stereo = false                -- field x: position (false) / pan
 local fire_flash = 0                     -- frames left of the "fire" flash
-local note, note_frames = nil, 0         -- one-line transient message
 
 -- ── meters ───────────────────────────────────────────────────────────────────
 -- in > 0 and out = 0 is a DSP bug; in = 0 is routing. Both have mattered.
 local in_amp, out_amp = 0, 0
 
 -- ── the field: what the UGen streams (see ugen/DiracUGen.cpp) ───────────────
+local sample_loaded = false             -- a buffer is loaded (engine said so)
+local sample_peaks = {}                  -- the loaded file's 128 peaks
+
 local viz = { sample = false, frozen = false, cap = 0, head = 0, texture = 0.5,
               srclen = 131072, grains = {} }
 local wave = { cap = 0, peaks = {} }
@@ -111,6 +124,8 @@ local ACTIVE_IF = {
   -- Mix is the live wet/dry (`if (liveMode && mix < ...)`); a loaded sample
   -- has no dry signal to mix
   mix = function() return not viz.sample end,
+  -- nothing to clear, or to switch to, without a loaded sample
+  unload = function() return sample_loaded end,
   -- Scale quantises the pitch offset = scatter + head x head tune; with
   -- neither there is nothing to snap
   scale = function()
@@ -128,6 +143,45 @@ local BINS = 128
 -- File scope so cleanup() can stop them: norns does NOT stop a script's polls,
 -- and one left running fires into a dead callback forever.
 local poll_in, poll_out
+
+-- ── sample files ─────────────────────────────────────────────────────────────
+-- The engine assumes 48 kHz (a 44.1 kHz file would play 9% sharp), so a file
+-- at any other rate is converted once with sox into a cache and the copy is
+-- loaded (engine.loadsample - NOT engine.load, which is norns' own "load an
+-- engine" function). Everything runs in norns.system_cmd, asynchronously, so a long
+-- conversion never stalls the UI. Channel count needs no conversion: the
+-- engine reads interleaved frames and mixes the first two channels.
+local CACHE = _path.audio .. "dirac/.cache/"
+
+local function shq(str) return "'" .. str:gsub("'", "'\\''") .. "'" end
+
+local function load_file(path)
+  if not path or path == "" or path == "-" or path:sub(-1) == "/" then return end
+  local name = path:match("[^/]*$")
+  local out = CACHE .. name:gsub("%.[^.]*$", "") .. "-48k.wav"
+  flash("reading " .. name)
+  local cmd = string.format(
+    [[r=$(soxi -r %s 2>/dev/null); if [ "$r" = "48000" ]; then printf %%s %s; ]] ..
+    [[elif [ -n "$r" ]; then mkdir -p %s && { [ -f %s ] || sox %s -r 48000 %s 2>/dev/null; } && printf %%s %s; fi]],
+    shq(path), shq(path), shq(CACHE), shq(out), shq(path), shq(out), shq(out))
+  norns.system_cmd(cmd, function(result)
+    result = (result or ""):gsub("%s+$", "")
+    if result == "" then
+      flash("can't read " .. name)
+    else
+      if result ~= path then flash("converted to 48k") end
+      send("loadsample", result)
+      params:set("source", 2)
+    end
+  end)
+end
+
+local SCRIPT_ACTION = {
+  unload = function()
+    send("clearsample")
+    params:set("source", 1)
+  end,
+}
 
 -- ── init ─────────────────────────────────────────────────────────────────────
 function init()
@@ -152,6 +206,9 @@ function init()
     elseif kind == "toggle" then
       params:add_binary(p.id, p.name, "toggle", p.default or 0)
       params:set_action(p.id, function(v) send(p.id, v) end)
+    elseif kind == "trigger" and p.script then
+      params:add_trigger(p.id, p.name)
+      params:set_action(p.id, function() SCRIPT_ACTION[p.id]() end)
     elseif kind == "trigger" then
       -- A rising edge is what the engine listens for. Send the edge, then
       -- drop back to 0 a moment later so the next press is a new edge.
@@ -161,6 +218,11 @@ function init()
         fire_flash = 8
         clock.run(function() clock.sleep(0.02); send(p.id, 0) end)
       end)
+    elseif kind == "file" then
+      -- Starts at the audio folder (a directory: ignored by load_file). A
+      -- PSET restores the path, and bang() below then reloads the file.
+      params:add_file(p.id, p.name, _path.audio)
+      params:set_action(p.id, function(path) load_file(path) end)
     end
   end
 
@@ -213,6 +275,16 @@ function osc.event(path, args, from)
                     rev = args[o + 7] > 0.5, dur = args[o + 8] }
     end
     viz.grains = g
+  elseif path == "/dirac/samplewave" then
+    for b = 1, BINS do sample_peaks[b] = args[b] or 0 end
+  elseif path == "/dirac/loaded" then
+    sample_loaded = true
+    flash("loaded " .. tostring(args[1]):match("[^/]*$"))
+  elseif path == "/dirac/load_fail" then
+    flash("can't read " .. tostring(args[1]):match("[^/]*$"))
+  elseif path == "/dirac/unloaded" then
+    sample_loaded = false
+    sample_peaks = {}
   elseif path == "/dirac/wave" then
     wave.cap = args[1]
     for b = 1, BINS do wave.peaks[b] = args[b + 1] or 0 end
@@ -225,13 +297,22 @@ local function current_pair()
   return k1_held and p.alt or p.main
 end
 
-local function flash(msg)
-  note, note_frames = msg, 40
-end
-
 local function adjust(id, d)
+  if not id then return end                 -- an empty slot on a page
   local kind = KIND[id]
-  if kind == "toggle" then
+  if kind == "file" then
+    -- fileselect takes over redraw/enc/key until a file is chosen or K2
+    -- cancels, then hands them back
+    if d > 0 then
+      fileselect.enter(_path.audio, function(path)
+        if path and path ~= "cancel" then params:set(id, path) end
+      end)
+    end
+    return
+  elseif kind == "trigger" then
+    if d > 0 then params:set(id, 1) end
+    return
+  elseif kind == "toggle" then
     params:set(id, d > 0 and 1 or 0)
   elseif kind == "control" and k2_down then
     -- Fine: a tenth of a detent, in the param's own (possibly exponential)
@@ -357,6 +438,17 @@ local function env_at(u)
 end
 
 local function draw_field()
+  -- sample mode: the file's peaks, start at the left, static
+  if viz.sample and #sample_peaks == BINS then
+    screen.level(1)
+    for b = 1, BINS do
+      local h = math.floor(math.sqrt(util.clamp(sample_peaks[b], 0, 1)) * (FH / 2 - 1))
+      if h > 0 then
+        screen.move(b - 0.5, YC - h); screen.line(b - 0.5, YC + h + 1); screen.stroke()
+      end
+    end
+  end
+
   -- waveform: dim columns, live ring only (sample peaks arrive with files)
   if not viz.sample and #wave.peaks == BINS then
     -- level 1: the backdrop. Grain bars start at 3 so they always read
@@ -446,12 +538,19 @@ local function is_onoff(id)
 end
 
 local function draw_param(x, id)
+  if not id then return end                 -- an empty slot on a page
   local prm = params:lookup_param(id)
   local on = active(id)
   screen.level(on and 4 or 2)
   screen.move(x, 55)
   screen.text(prm.name)
-  if KIND[id] == "toggle" then
+  if KIND[id] == "file" then
+    local name = sample_loaded and params:string(id) or "none"
+    if #name > 14 then name = name:sub(1, 13) .. "~" end
+    screen.level(on and 15 or 3); screen.move(x, 63); screen.text(name)
+  elseif KIND[id] == "trigger" then
+    screen.level(on and 10 or 3); screen.move(x, 63); screen.text("E3 >")
+  elseif KIND[id] == "toggle" then
     draw_toggle(x, 63, params:get(id) == 1 and "on" or "off", params:get(id) == 1)
   elseif is_onoff(id) then
     local on = params:get(id) == 2

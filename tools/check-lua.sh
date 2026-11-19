@@ -34,6 +34,28 @@ if [ -n "$LUAC" ]; then
         fi
     done
     echo "check-lua: parsed with $LUAC (the real Lua grammar)"
+
+    # Globals in dirac.lua. A local used above its declaration compiles fine
+    # and silently reads a nil GLOBAL instead - it happened twice here
+    # (`viz` in a dim rule, `sample_loaded` and `note` in flash/the rules).
+    # The bytecode shows it: every _ENV read/write must be a norns/Lua global
+    # or one of the script callbacks norns calls.
+    allowed_r=" _path clock controlspec engine include ipairs pairs math norns osc params poll redraw require screen string table tonumber tostring type util os print "
+    allowed_w=" init enc key redraw cleanup "
+    bad=""
+    for g in $($LUAC -p -l dirac.lua | grep -oE 'GETTABUP.*_ENV "[A-Za-z_0-9]+"' | grep -oE '"[^"]+"' | tr -d '"' | sort -u); do
+        case "$allowed_r" in *" $g "*) ;; *) bad="$bad read:$g";; esac
+    done
+    for g in $($LUAC -p -l dirac.lua | grep -oE 'SETTABUP.*_ENV "[A-Za-z_0-9]+"' | grep -oE '"[^"]+"' | tr -d '"' | sort -u); do
+        case "$allowed_w" in *" $g "*) ;; *) bad="$bad write:$g";; esac
+    done
+    if [ -n "$bad" ]; then
+        echo "check-lua: FAIL  dirac.lua touches unexpected globals:$bad"
+        echo "                 (a local used before its declaration reads a nil global)"
+        fail=1
+    else
+        echo "check-lua: OK    dirac.lua globals are norns/Lua names and callbacks only"
+    fi
     exit $fail
 fi
 
