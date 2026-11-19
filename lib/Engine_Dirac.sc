@@ -48,8 +48,9 @@ Engine_Dirac : CroneEngine {
 
 	alloc {
 		try {
-			this.prAlloc;
-			"Engine_Dirac: loaded".postln;
+			// prAlloc answers false when the UGen is not installed yet; it
+			// has already said why, so do not also claim to have loaded.
+			if (this.prAlloc != false) { "Engine_Dirac: loaded".postln };
 		} { arg err;
 			"### Engine_Dirac: alloc failed ###".postln;
 			err.reportError;
@@ -59,7 +60,7 @@ Engine_Dirac : CroneEngine {
 	prAlloc {
 		var srv = context.server;
 		// The UGen class lives in Extensions/Dirac/Dirac.sc, installed by
-		// dirac.lua on its first run. It is looked up at RUN time, never named
+		// norns-dirac.lua on its first run. It is looked up at RUN time, never named
 		// in source: if this class named `Dirac` directly and a tester
 		// restarted before that install, sclang would fail to compile the
 		// WHOLE class library and every engine on the norns would break. This
@@ -67,7 +68,7 @@ Engine_Dirac : CroneEngine {
 		var diracUGen = \Dirac.asClass;
 		if (diracUGen.isNil) {
 			"### Engine_Dirac: the Dirac UGen is not installed yet. Load the dirac script once (it installs it), then SYSTEM > RESTART.".postln;
-			^this;
+			^false;
 		};
 
 		// Built as a FUNCTION-SYNTH via .play, not SynthDef + sync + Synth.new.
@@ -186,7 +187,7 @@ Engine_Dirac : CroneEngine {
 		this.addPoll(\out_amp, { outAmp });
 
 		// Sample mode. Not params: these carry a path and a lifecycle, not a
-		// value (dirac.lua's `sample` file param drives them).
+		// value (norns-dirac.lua's `sample` file param drives them).
 		// NOT "load"/"unload": matron's engine table already has engine.load
 		// (load an engine by name), so engine.load(path) never reached here -
 		// norns tried to load an engine called "<path>". check-params.sh now
@@ -244,7 +245,7 @@ Engine_Dirac : CroneEngine {
 	// Read a file into a NEW buffer, point the synth at it, and only then free
 	// the old one. The UGen re-reads the buffer every block, so the swap is
 	// clean as soon as the synth has moved; 0.25 s is many blocks of margin.
-	// The file must already be 48 kHz (dirac.lua converts with sox): the engine
+	// The file must already be 48 kHz (norns-dirac.lua converts with sox): the engine
 	// assumes 48 kHz, and a 44.1 kHz file would play 9% sharp.
 	loadSample { arg path;
 		var gen;

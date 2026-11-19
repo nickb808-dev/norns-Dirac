@@ -5,7 +5,7 @@
 #   lib/Engine_Dirac.sc   addCommand  what matron exposes as engine.<id>
 #   lib/Engine_Dirac.sc   SynthDef arg  what the synth actually accepts
 #
-# The failure this exists to prevent is SILENT. dirac.lua calls engine.<id>(x).
+# The failure this exists to prevent is SILENT. norns-dirac.lua calls engine.<id>(x).
 # If Engine_Dirac.sc never declared that command, matron's engine table has no
 # such field and the call is a nil index — the parameter moves in the menu,
 # nothing changes in the sound, and there is no error anywhere that names the
@@ -25,7 +25,7 @@ fail=0
 
 # Every kind (control, option, toggle, trigger) lives in lib/params.lua, the
 # three od::Option menus included, so one extraction covers them all.
-# `script = true` params are handled by dirac.lua itself (a file path, an
+# `script = true` params are handled by norns-dirac.lua itself (a file path, an
 # unload action), not by an engine command of the same name.
 lua_ids=$(grep -v 'script\s*=\s*true' lib/params.lua \
           | pgrep_o '^\s*\{\s*id\s*=\s*"\K[a-zA-Z]+' | sort -u)
@@ -58,7 +58,7 @@ missing=$(comm -23 <(echo "$lua_ids") <(echo "$sc_cmds"))
 if [ -n "$missing" ]; then
     echo "check-params: FAIL  in lib/params.lua but NOT addCommand'd:"
     echo "$missing" | sed 's/^/                      /'
-    echo "                    dirac.lua would call a nil engine.<id> and the"
+    echo "                    norns-dirac.lua would call a nil engine.<id> and the"
     echo "                    parameter would move while nothing happened"
     fail=1
 fi
@@ -110,16 +110,16 @@ fi
 if command -v lua >/dev/null 2>&1; then
     lua - <<'LUA' || fail=1
 -- check-pages.lua: every param in lib/params.lua is on exactly one page of
--- dirac.lua's PAGES (fire excepted: it is K3), and every page names a real
+-- norns-dirac.lua's PAGES (fire excepted: it is K3), and every page names a real
 -- param. A param left off every page is reachable only from the PARAMS menu,
 -- which is how "I can't see grain count" happens.
 local SPEC = dofile("lib/params.lua")
 local OFF_PAGE = { fire = "K3" }
 local ids = {}
 for _, p in ipairs(SPEC) do ids[p.id] = true end
-local src = assert(io.open("dirac.lua")):read("a")
+local src = assert(io.open("norns-dirac.lua")):read("a")
 local block = src:match("local PAGES = (%b{})")
-if not block then print("check-pages: FAIL  could not find PAGES in dirac.lua"); os.exit(1) end
+if not block then print("check-pages: FAIL  could not find PAGES in norns-dirac.lua"); os.exit(1) end
 local used, n = {}, 0
 for list in block:gmatch("main%s*=%s*(%b{})") do
   for id in list:gmatch('"([%w_]+)"') do used[id] = (used[id] or 0) + 1; n = n + 1 end

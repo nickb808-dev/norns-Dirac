@@ -14,12 +14,12 @@ of them today). Developed on a norns shield with a Raspberry Pi 4B.
 1. In maiden, run:
 
    ```
-   ;install https://github.com/nickb808-dev/dirac
+   ;install https://github.com/nickb808-dev/norns-dirac
    ```
 
-2. Load **dirac** from SELECT. The first time, it installs its SuperCollider
+2. Load **norns-dirac** from SELECT. The first time, it installs its SuperCollider
    plugin and shows **"engine installed. SYSTEM > RESTART"**.
-3. Do **SYSTEM > RESTART**, then load **dirac** again. You'll see the title
+3. Do **SYSTEM > RESTART**, then load **norns-dirac** again. You'll see the title
    screen, then the grain field.
 
 An update that changes the engine shows the same screen once, and needs one
@@ -78,7 +78,7 @@ ways that look like script bugs. (Only matters if you log in over SSH.)
 Only needed on a 64-bit norns image, or to work on the code: on the norns,
 
 ```
-cd ~/dust/code/dirac/ugen && make install
+cd ~/dust/code/norns-dirac/ugen && make install
 ```
 
 then SYSTEM > RESTART. `make install` marks the engine as a source build, so
@@ -129,7 +129,7 @@ test/reference/  the canonical ident render
 docs/            NORNS-PORT.md — platform notes, interface design, the plan
 ugen/            (Phase 1) scsynth plugin wrapper
 lib/             (Phase 2) Engine_Dirac.sc
-dirac.lua        (Phase 2) the script
+norns-dirac.lua  the script
 ```
 
 ## The shim, and the one real difference

@@ -661,7 +661,7 @@ local function draw_param(x, id)
 end
 
 local INSTALL_MSG = {
-  installed   = { "dirac " .. VERSION, "engine installed.", "SYSTEM > RESTART,", "then load dirac again." },
+  installed   = { "dirac " .. VERSION, "engine installed.", "SYSTEM > RESTART,", "then load norns-dirac." },
   unsupported = { "dirac " .. VERSION, "this norns is not armv7l:", "build the engine", "from source (README)." },
   failed      = { "dirac " .. VERSION, "engine install failed.", "see maiden's output", "for the reason." },
 }

@@ -8,7 +8,7 @@
 # sources to a scratch folder on the device, builds there (the installed
 # plugin is not touched), fetches the .so into ugen/prebuilt/ and writes
 # ugen/prebuilt/BUILD: the source hash (tools/prebuilt-sources.sh), the
-# machine, the compiler and the date. dirac.lua installs it when the BUILD on
+# machine, the compiler and the date. norns-dirac.lua installs it when the BUILD on
 # the device differs; tools/check-prebuilt.sh fails when it is stale.
 set -eu
 cd "$(dirname "$0")/.."

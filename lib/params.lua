@@ -1,7 +1,7 @@
 -- lib/params.lua — THE parameter table. One list, every consumer.
 --
 -- Every parameter's name, range, default and unit lives here and nowhere else.
--- dirac.lua builds the params menu from it, Engine_Dirac.sc is checked against
+-- norns-dirac.lua builds the params menu from it, Engine_Dirac.sc is checked against
 -- it (tools/check-params.sh), and the paged UI will index into it.
 --
 -- The ranges and defaults are the ER-301 unit's OWN, copied from
@@ -20,7 +20,7 @@
 --   unit      display suffix, or nil
 --   step      1 for the integer-stepping dials; the DSP rounds them anyway
 --   warp      controlspec warp; 'lin' unless noted
---   detents   encoder detents across the whole range (default 200; dirac.lua
+--   detents   encoder detents across the whole range (default 200; norns-dirac.lua
 --             turns this into norns' `quantum`, which is a FRACTION of the
 --             range). Holding K1 makes every detent ten times finer.
 --
@@ -36,7 +36,7 @@
 --           the engine compares against literal 1/2/3).
 -- toggle:   on/off; the engine receives 0 or 1. For controls the engine reads
 --           as a gate (`> 0.5`), where a 0–1 dial only pretended to be more.
--- trigger:  a momentary action; dirac.lua sends 1 then 0.
+-- trigger:  a momentary action; norns-dirac.lua sends 1 then 0.
 -- file:     a path chosen in the norns file browser.
 --
 -- script = true marks a param the SCRIPT handles itself rather than sending
@@ -54,7 +54,7 @@ return {
 
   -- ── source: live input or a loaded sample ─────────────────────────────────
   { id = "source",     name = "source",      kind = "option", options = { "live", "sample" }, base = 1, default = 1 },
-  -- dirac.lua converts non-48 kHz files with sox, then calls engine.load().
+  -- norns-dirac.lua converts non-48 kHz files with sox, then calls engine.load().
   { id = "sample",     name = "sample",      kind = "file", script = true },
   { id = "unload",     name = "clear sample",kind = "trigger", script = true },
   -- Saves the live ring (2.73 s, feedback included) to
