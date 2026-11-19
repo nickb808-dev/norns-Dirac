@@ -537,17 +537,21 @@ int main()
         const double secs = double(blocks) * FRAMELENGTH / 48000.0;
         const double vizHz = gViz.count / secs, waveHz = gWave.count / secs;
 
-        bool vizOk = gViz.last.size() >= 6 && gViz.node == 1234;
+        bool vizOk = gViz.last.size() >= 7 && gViz.node == 1234;
         int active = 0, counted = 0;
         if (vizOk) {
             for (int g = 0; g < dirac::Dirac::kMaxGrains; ++g)
                 if (h.unit()->engine->isGrainActive(g)) ++counted;
             active = int(gViz.last[4]);
-            vizOk = (gViz.last.size() == size_t(6 + 6 * active))
-                 && gViz.last[5] >= 0.0f && gViz.last[5] <= 1.0f;     // texture
+            vizOk = (gViz.last.size() == size_t(7 + 8 * active))
+                 && gViz.last[5] >= 0.0f && gViz.last[5] <= 1.0f      // texture
+                 && gViz.last[6] == float(kRingSize);                  // live: srcLen = ring
             for (int g = 0; vizOk && g < active; ++g) {
-                const float rp = gViz.last[6 + g * 6], br = gViz.last[6 + g * 6 + 3];
-                vizOk = rp >= 0.0f && rp <= 1.0f && std::isfinite(br);
+                const float *G = &gViz.last[7 + g * 8];
+                // read pos, envelope, gain, duration: in range and finite;
+                // duration = the GrainLen control (0.077 s here) in samples.
+                vizOk = G[0] >= 0.0f && G[0] <= 1.0f && G[3] >= 0.0f && G[3] <= 1.0f
+                     && std::isfinite(G[4]) && std::fabs(G[7] - 0.077f * 48000.0f) < 2.0f;
             }
         }
         // The last viz frame and the engine's state are from the same block

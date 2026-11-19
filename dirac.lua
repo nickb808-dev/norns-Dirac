@@ -91,14 +91,11 @@ local note, note_frames = nil, 0         -- one-line transient message
 local in_amp, out_amp = 0, 0
 
 -- ── the field: what the UGen streams (see ugen/DiracUGen.cpp) ───────────────
-local viz = { sample = false, frozen = false, cap = 0, head = 0, texture = 0.5, grains = {} }
+local viz = { sample = false, frozen = false, cap = 0, head = 0, texture = 0.5,
+              srclen = 131072, grains = {} }
 local wave = { cap = 0, peaks = {} }
 local RING = 131072      -- engine ring size; the UGen's test proves it
 local BINS = 128
-
--- Phosphor field functions, defined with the drawing code below; declared
--- here because the redraw clock in init() calls decay_phosphor.
-local decay_phosphor, stamp, draw_phosphor
 
 -- File scope so cleanup() can stop them: norns does NOT stop a script's polls,
 -- and one left running fires into a dead callback forever.
@@ -165,7 +162,6 @@ function init()
       clock.sleep(1 / 30)
       if fire_flash > 0 then fire_flash = fire_flash - 1 end
       if note_frames > 0 then note_frames = note_frames - 1 end
-      decay_phosphor()
       redraw()
     end
   end)
@@ -180,11 +176,13 @@ function osc.event(path, args, from)
     viz.head   = args[4]
     local n = math.floor(args[5])
     viz.texture = args[6]
+    viz.srclen  = args[7]
     local g = {}
     for i = 0, n - 1 do
-      local o = 6 + i * 6
+      local o = 7 + i * 8
       g[#g + 1] = { pos = args[o + 1], spawn = args[o + 2], pitch = args[o + 3],
-                    bright = args[o + 4], pan = args[o + 5], rev = args[o + 6] > 0.5 }
+                    env = args[o + 4], gain = args[o + 5], pan = args[o + 6],
+                    rev = args[o + 7] > 0.5, dur = args[o + 8] }
     end
     viz.grains = g
   elseif path == "/dirac/wave" then
@@ -281,67 +279,61 @@ local function draw_toggle(x, y, label, on)
   return w
 end
 
--- ── phosphor ─────────────────────────────────────────────────────────────────
--- Grains are stamped into a brightness buffer that fades every frame, as the
--- ER-301's field does (DiracFieldGraphic: additive hits, decay per frame), so
--- a drifting grain leaves a short glowing trail and a dense cloud reads as a
--- cloud. Sparse: only lit cells are stored, so cost scales with grains, not
--- with the 128x40 field.
-local glow = {}             -- [y * 128 + x] = brightness 0..15
-local DECAY = 0.72          -- per frame at 30 fps: a trail of ~100 ms
+-- ── grain envelopes ──────────────────────────────────────────────────────────
+-- Each grain is drawn as a 1-pixel bar over the stretch of source it reads,
+-- lit along its length by its ENVELOPE, so the controls that shape a grain
+-- change the picture: shape / texture / tilt move where the bar is bright,
+-- grain length and transpose change its length, reverse flips its direction.
+-- The engine sends position, pitch, gain and duration; the profile is
+-- computed here from the same params the engine reads.
+local PROFILE_N = 32
+local profile = {}          -- envelope sampled at PROFILE_N points, 0..1
 
-decay_phosphor = function()
-  for k, v in pairs(glow) do
-    v = v * DECAY
-    if v < 0.8 then glow[k] = nil else glow[k] = v end
+local function base_env(x, window, tex)
+  if window == 1 then return math.exp(-0.5 * ((x - 0.5) / 0.18) ^ 2) end    -- bell
+  if window == 2 then                                                        -- sinc
+    local u = (x - 0.5) * 6; return u == 0 and 1 or math.abs(math.sin(math.pi * u) / (math.pi * u)) end
+  if window == 3 then return 1 - math.abs(2 * x - 1) end                     -- triangle
+  if window == 4 then return (1 - x) ^ 2 end                                 -- decay
+  if window == 5 then return x end                                           -- ramp
+  if window == 7 then return 1 end                                           -- square
+  local function tukey(u)
+    local t = 0.125
+    if u < t then return 0.5 * (1 - math.cos(math.pi * u / t)) end
+    if u > 1 - t then return 0.5 * (1 - math.cos(math.pi * (1 - u) / t)) end
+    return 1
+  end
+  if window == 6 then return tukey(x) end                                    -- tukey
+  -- normal: texture morphs percussive (0) -> hann (0.5) -> tukey (1)
+  local perc = (x < 0.02) and (x / 0.02) or math.exp(-5 * (x - 0.02))
+  local hann = math.sin(math.pi * x) ^ 2
+  if tex <= 0.5 then
+    local k = tex / 0.5; return perc * (1 - k) + hann * k
+  end
+  local k = (tex - 0.5) / 0.5; return hann * (1 - k) + tukey(x) * k
+end
+
+local function update_profile()
+  local window = params:get("window") - 1             -- option index -> 0..7
+  local tex = params:get("texture")
+  local tilt = params:get("tilt")                     -- -1 attack .. +1 swell
+  local warp = 2 ^ tilt
+  for i = 1, PROFILE_N do
+    local x = (i - 0.5) / PROFILE_N
+    profile[i] = util.clamp(base_env(x ^ warp, window, tex), 0, 1)
   end
 end
 
-local function hit(x, y, v)
-  if x < 0 or x > 127 or y < FY or y >= FY + FH then return end
-  local k = y * 128 + x
-  local cur = glow[k] or 0
-  if v > cur then glow[k] = v end
-end
-
--- Glyph shape from the envelope the grains are spawning with (texture: 0
--- percussive, 0.5 hann, 1 tukey; a fixed Window maps to its nearest), at three
--- pixels across - what the screen allows. Faint grains are a single pixel;
--- reverse grains point down, as on the ER-301.
-local GLYPH = {
-  perc  = { {-1,-1,1}, {-1,0,1}, {-1,1,1}, {0,0,0.7}, {1,0,0.4} },   -- sharp attack, tail
-  hann  = { {0,-1,0.6}, {-1,0,0.6}, {0,0,1}, {1,0,0.6}, {0,1,0.6} }, -- round
-  tukey = { {-1,-1,0.9}, {0,-1,0.9}, {1,-1,0.9}, {-1,0,0.9}, {0,0,1}, {1,0,0.9} }, -- flat top
-}
-
-stamp = function(x, y, b, rev)
-  local peak = 3 + 12 * b
-  if b < 0.25 then hit(x, y, peak); return end
-  local t = viz.texture or 0.5
-  local glyph = (t < 0.25) and GLYPH.perc or (t > 0.75) and GLYPH.tukey or GLYPH.hann
-  for _, p in ipairs(glyph) do hit(x + p[1], y + p[2], peak * p[3]) end
-  if rev then hit(x, y + 2, peak * 0.6) end
-end
-
-draw_phosphor = function()
-  -- one fill per brightness level: screen.level applies to the whole fill
-  local by = {}
-  for k, v in pairs(glow) do
-    local l = math.floor(util.clamp(v, 1, 15))
-    local t = by[l]; if not t then t = {}; by[l] = t end
-    t[#t + 1] = k
-  end
-  for l, cells in pairs(by) do
-    screen.level(l)
-    for _, k in ipairs(cells) do screen.pixel(k % 128, k // 128) end
-    screen.fill()
-  end
+local function env_at(u)
+  return profile[util.clamp(math.floor(u * PROFILE_N) + 1, 1, PROFILE_N)] or 0
 end
 
 local function draw_field()
   -- waveform: dim columns, live ring only (sample peaks arrive with files)
   if not viz.sample and #wave.peaks == BINS then
-    screen.level(2)
+    -- level 1: the backdrop. Grain bars start at 3 so they always read
+    -- against it (at 2 they vanished into it).
+    screen.level(1)
     for b = 1, BINS do
       local h = math.floor(math.sqrt(util.clamp(wave.peaks[b], 0, 1)) * (FH / 2 - 1))
       if h > 0 then
@@ -364,21 +356,38 @@ local function draw_field()
     end
   end
 
-  -- grains: phosphor glyphs (see "phosphor" above draw_field)
+  -- grains: envelope bars with a bright read head
+  update_profile()
   for _, g in ipairs(viz.grains) do
-    local x = view_stereo and xof((g.pan + 1) / 2) or xof(g.pos)
-    local y = math.floor(util.clamp(YC - g.pitch * PX_PER_ST, FY + 2, FY + FH - 3))
-    local b = util.clamp(math.sqrt(util.clamp(g.bright * 2, 0, 1)), 0, 1)
-    if not view_stereo then
-      -- read-span trail from where the grain started, as on the ER-301
-      local sx = xof(g.spawn)
-      if sx ~= x then
-        screen.level(2); screen.move(sx + 0.5, y + 0.5); screen.line(x + 0.5, y + 0.5); screen.stroke()
+    local y = math.floor(util.clamp(YC - g.pitch * PX_PER_ST, FY + 1, FY + FH - 2))
+    -- brightness of the whole grain follows its real gain (level, density
+    -- compensation, compress); sqrt so quiet grains stay visible
+    local gl = util.clamp(math.sqrt(util.clamp(g.gain * 2, 0, 1)), 0.15, 1)
+    if view_stereo then
+      local x = xof((g.pan + 1) / 2)
+      screen.level(math.floor(util.clamp(2 + 13 * gl * g.env, 1, 15)))
+      screen.pixel(x, y); screen.fill()
+    else
+      -- the whole read span: duration x playback rate, leftward if reverse
+      local span = g.dur * (2 ^ (g.pitch / 12)) / (viz.srclen > 0 and viz.srclen or RING)
+      local x0 = g.spawn * 127
+      local x1 = x0 + (g.rev and -span or span) * 127
+      local lo, hi = math.floor(math.min(x0, x1) + 0.5), math.floor(math.max(x0, x1) + 0.5)
+      if hi > lo then
+        for px = math.max(lo, 0), math.min(hi, 127) do
+          local u = (px - lo) / (hi - lo)
+          if g.rev then u = 1 - u end                 -- envelope runs with the read
+          -- 3..10: always above the waveform's 1, never competing with
+          -- the read head
+          local l = math.floor(3 + 7 * gl * env_at(u) + 0.5)
+          screen.level(l); screen.pixel(px, y); screen.fill()
+        end
       end
+      -- read head: the one sharp, bright pixel
+      screen.level(math.floor(util.clamp(8 + 7 * gl * (0.3 + 0.7 * g.env), 1, 15)))
+      screen.pixel(xof(g.pos), y); screen.fill()
     end
-    stamp(x, y, b, g.rev)
   end
-  draw_phosphor()
 
   -- status, top right: visible toggles
   local x = 127

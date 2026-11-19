@@ -88,8 +88,13 @@ static inline bool isAudioRateInlet(int i) { return i == kIn || i == kFire; }
 // sclang with SendNodeReply - the mechanism SendReply uses - at display rate:
 //
 //   /dirac_viz  ~30 Hz   [sampleMode, frozen, capWrite, headPos01, nActive,
-//                         texture, then per ACTIVE grain: readPos01,
-//                         spawnPos01, pitchSemi, brightness, pan, reverse]
+//                         texture, srcLen, then per ACTIVE grain: readPos01,
+//                         spawnPos01, pitchSemi, envelope, gain, pan,
+//                         reverse, durationSamples]
+//
+// srcLen is the length of the [0,1] axis in samples (the ring, or the
+// sample), so the UI can draw each grain's whole read span: duration x
+// playback rate (2^(pitch/12)) / srcLen, leftward if reverse.
 //   /dirac_wave ~15 Hz   [capWrite, then kWaveBins peaks]
 //
 // texture is getVizTexture(): the envelope shape grains spawn with, 0
@@ -108,8 +113,8 @@ static constexpr int kWaveBins    = 128;     // one per screen column
 static constexpr int kWaveBinLen  = kRingSize / kWaveBins;   // 1024
 static constexpr int kVizHz       = 30;
 static constexpr int kWaveHz      = 15;
-static constexpr int kVizPerGrain = 6;
-static constexpr int kVizHeader   = 6;
+static constexpr int kVizPerGrain = 8;
+static constexpr int kVizHeader   = 7;
 
 // Unqualified `Dirac` is this wrapper's unit. The engine is always `dirac::Dirac`.
 struct Dirac : public Unit {
@@ -335,9 +340,11 @@ void Dirac_next(Dirac *unit, int inNumSamples)
             m[n++] = d->getGrainReadPos01(g);
             m[n++] = d->getGrainSpawnPos01(g);
             m[n++] = d->getGrainPitch(g);
-            m[n++] = d->getGrainEnvelope(g) * d->getGrainGain(g);
+            m[n++] = d->getGrainEnvelope(g);
+            m[n++] = d->getGrainGain(g);
             m[n++] = d->getGrainPan(g);
             m[n++] = d->getGrainReverse(g) ? 1.0f : 0.0f;
+            m[n++] = float(d->getGrainDuration(g));
             ++active;
         }
         m[0] = sampleMode ? 1.0f : 0.0f;
@@ -346,6 +353,7 @@ void Dirac_next(Dirac *unit, int inNumSamples)
         m[3] = (sampleMode && d->mEndIndex > 0) ? float(d->getPosition()) / float(d->mEndIndex) : 0.0f;
         m[4] = float(active);
         m[5] = d->getVizTexture();
+        m[6] = (sampleMode && d->mEndIndex > 0) ? float(d->mEndIndex) : float(kRingSize);
         SendNodeReply(&unit->mParent->mNode, -1, "/dirac_viz", n, m);
     }
 
