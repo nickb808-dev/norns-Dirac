@@ -30,6 +30,9 @@
 Engine_Dirac : CroneEngine {
 
 	var <synth;
+	// Meter state. Written by the OSCFunc below, read by the polls.
+	var <meter;
+	var <inAmp = 0, <outAmp = 0;
 
 	*new { arg context, doneCallback;
 		^super.new(context, doneCallback);
@@ -81,18 +84,52 @@ Engine_Dirac : CroneEngine {
 			// on rather than at a block boundary.
 			var fireAr = K2A.ar(fire);
 
-			Out.ar(out, Dirac.ar(src,
+			// Held in a var rather than passed straight to Out.ar so the meter
+			// can tap the ACTUAL output, not a second evaluation of it.
+			var sig = Dirac.ar(src,
 				playhead, rate, posjtr, spread, detune, level, revprob, psprd,
 				texture, grains, fireAr, hold, semishift, grainlen, mix, feedback,
 				compress, binaural, scale, voct, speed, heads, headspread,
 				headtune, snap, color, tilt, tiltspread, window,
-				playheadsOpt, diffuseOpt, freezeOpt));
+				playheadsOpt, diffuseOpt, freezeOpt);
+
+			// METERS, and the reason they are worth the two UGens.
+			//
+			// This engine has now been silent twice for reasons that were
+			// INVISIBLE from the norns: an alloc error that never reached a log,
+			// and a signal path that could not be told apart from a working one
+			// without headphones and a guess. An engine that processes an input
+			// must be able to say whether it is receiving anything - "input
+			// arriving, output silent" and "no input at all" are different bugs
+			// with different fixes, and they look identical when the only
+			// instrument is your ears.
+			//
+			// Control rate, 15 Hz, two Amplitude followers: the cost is
+			// negligible next to 16 grains, and it is always on because a
+			// diagnostic you have to switch on is one you do not have when the
+			// thing breaks.
+			SendReply.kr(Impulse.kr(15), '/dirac_amp',
+				[Amplitude.kr(src), Amplitude.kr(sig[0] + sig[1])]);
+
+			Out.ar(out, sig);
 
 		}.play(args: [
 			\out,    context.out_b,
 			\inbusl, context.in_b[0].index,
 			\inbusr, context.in_b[1].index
 		], target: context.xg);
+
+		// SendReply -> OSCFunc -> cached value -> addPoll. Bus.getSynchronous
+		// would be shorter, but it wants sclang's shared-memory interface to
+		// the server, and sclang did not boot scsynth here. This route works
+		// either way.
+		meter = OSCFunc({ arg msg;
+			inAmp  = msg[3];
+			outAmp = msg[4];
+		}, '/dirac_amp', srv.addr);
+
+		this.addPoll(\in_amp,  { inAmp });
+		this.addPoll(\out_amp, { outAmp });
 
 		// One command per parameter. tools/check-params.sh reads these symbols
 		// and compares them against lib/params.lua.
@@ -115,6 +152,7 @@ Engine_Dirac : CroneEngine {
 	}
 
 	free {
+		meter.free;
 		synth.free;
 	}
 }

@@ -51,6 +51,25 @@ local LIST = {}
 local sel = 1
 local dirty = true
 
+-- ── meters ───────────────────────────────────────────────────────────────────
+-- Fed by the engine's in_amp / out_amp polls. These exist because this engine
+-- has been silent twice for reasons invisible from the norns, and because a
+-- granular PROCESSOR that shows no input level is indistinguishable, on stage
+-- or on the bench, from one whose DSP is broken. in > 0 and out = 0 is a DSP
+-- bug; in = 0 is an audio-routing problem and no amount of DSP work touches it.
+local in_amp, out_amp = 0, 0
+local in_peak, out_peak = 0, 0
+
+-- File scope, NOT local to init(), because cleanup() has to be able to stop
+-- them. A poll is registered with matron, not with the script: norns tears down
+-- a script's clocks and metros for you but it does NOT stop its polls. One left
+-- running keeps firing into a callback whose script is gone, at its poll rate,
+-- forever - which reads on screen as an endless "attempt to call a nil value"
+-- with an empty traceback, because the call comes from C and there is no Lua
+-- stack above it. That is not a crash in the next script; it is this one still
+-- talking. Stopping them in cleanup() is the whole fix.
+local poll_in, poll_out
+
 local ROWS = 5   -- visible rows on the 64px screen
 
 function init()
@@ -80,9 +99,36 @@ function init()
 
   params:bang()
 
+  -- poll.set returns nil when the engine never registered the poll, which is
+  -- precisely the case when the engine failed to load. Same rule as send():
+  -- note it and keep going, never raise out of init().
+  poll_in = poll.set("in_amp", function(v)
+    in_amp = v
+    if v > in_peak then in_peak = v end
+    dirty = true
+  end)
+  poll_out = poll.set("out_amp", function(v)
+    out_amp = v
+    if v > out_peak then out_peak = v end
+    dirty = true
+  end)
+  if poll_in and poll_out then
+    poll_in.time = 0.1
+    poll_out.time = 0.1
+    poll_in:start()
+    poll_out:start()
+  else
+    engine_ok = false
+  end
+
   clock.run(function()
     while true do
       clock.sleep(1 / 15)
+      -- Decay the held peaks rather than tracking the instantaneous value
+      -- alone: a source that has stopped and a source that was never there
+      -- must not look the same for the one frame you happen to be looking at.
+      in_peak = in_peak * 0.96
+      out_peak = out_peak * 0.96
       if dirty then redraw(); dirty = false end
     end
   end)
@@ -115,6 +161,28 @@ function key(n, z)
   dirty = true
 end
 
+-- One meter: label, a 22 px bar, and a peak tick. Deliberately crude - it has
+-- to answer "is anything arriving", not "what is the level", and it has to do
+-- that in the 80 px left over beside the scroll position.
+local function meter(x, label, v, peak)
+  screen.level(3)
+  screen.move(x, 63)
+  screen.text(label)
+  local x0 = x + (label == "in" and 12 or 18)
+  screen.level(1)
+  screen.rect(x0, 58, 22, 5)
+  screen.stroke()
+  local w = math.floor(util.clamp(v * 2, 0, 1) * 20)
+  if w > 0 then
+    screen.level(15)
+    screen.rect(x0 + 1, 59, w, 3)
+    screen.fill()
+  end
+  screen.level(peak > 0.001 and 8 or 2)
+  screen.rect(x0 + 1 + math.floor(util.clamp(peak * 2, 0, 1) * 20), 58, 1, 5)
+  screen.fill()
+end
+
 function redraw()
   screen.clear()
 
@@ -138,13 +206,21 @@ function redraw()
   screen.level(1)
   screen.move(0, 63)
   screen.text(sel .. "/" .. #LIST)
+
   if not engine_ok then
     screen.level(15)
     screen.move(127, 63)
     screen.text_right("NO ENGINE")
+  else
+    meter(46, "in", in_amp, in_peak)
+    meter(90, "out", out_amp, out_peak)
   end
   screen.update()
 end
 
 function cleanup()
+  -- Stop the meters. See the note at poll_in/poll_out: an unstopped poll
+  -- outlives the script and errors on every fire from then on.
+  if poll_in then poll_in:stop() end
+  if poll_out then poll_out:stop() end
 end
