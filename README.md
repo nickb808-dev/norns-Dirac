@@ -65,7 +65,7 @@ Please include:
 
 - what you did, what you expected, and what happened;
 - your norns (official or shield, and which Pi) and its norns version;
-- if anything errored, maiden's output after loading dirac.
+- if anything errored, maiden's output after loading norns-dirac.
 
 ### If you SSH into a norns shield
 
