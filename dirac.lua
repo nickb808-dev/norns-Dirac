@@ -14,7 +14,9 @@
 
 engine.name = "Dirac"
 
-local SPEC = include("norns-dirac/lib/params")
+-- Relative to this script's own folder, so the install folder can be named
+-- anything (it is `dirac` on the device; the repo is `norns-dirac`).
+local SPEC = include("lib/params")
 
 local OPTIONS = {
   -- 1-based, matching od::OptionControl on the ER-301. The engine compares
