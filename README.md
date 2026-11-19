@@ -4,9 +4,16 @@
 
 Target: **norns shield on a Raspberry Pi 4B**. Works on official norns too.
 
-> **Status: Phase 0 complete.** The engine is vendored and proven; there is no
-> UGen, no SuperCollider, and no script yet. It makes no sound. See
-> `docs/NORNS-PORT.md` for the full plan.
+> **Status (2026-11-18): makes grains on the device.** The UGen, the norns
+> engine and a basic list-UI script all run on a norns shield (Pi 4B), with
+> live input. The engine is still the v0.2.10 vendored copy; upstream is at
+> 0.2.12. Next: the work in `docs/PLAN-SOUND-UI-FILES.md`, which covers the
+> engine sync, finer controls, a paged waveform UI, and file load and capture.
+> The history of getting to sound is in `docs/PAPPUS-VS-DIRAC.md` §4.
+>
+> **norns shield setup:** set `RemoveIPC=no` in `/etc/systemd/logind.conf`
+> and reboot. Without it, every SSH logout deletes JACK's shared memory, and
+> audio connections break in ways that look like script bugs.
 
 ---
 
