@@ -89,8 +89,8 @@ the script won't replace it with the prebuilt one.
 ## What this is
 
 The DSP is the **canonical Dirac engine**, vendored verbatim from the ER-301
-repo — not a reimplementation. The same C++ that runs on the ER-301, on the
-Daisy Seed (`DAISY-SEED-PORT.md`) and in Tap-O-Matic runs here, wrapped as a
+repo — not a reimplementation. The same C++ that runs on the ER-301 and on the
+Daisy Seed (`DAISY-SEED-PORT.md`) runs here, wrapped as a
 SuperCollider UGen and driven by a Lua script.
 
 That is the whole design constraint: **one engine, ported.** A SuperCollider
@@ -160,4 +160,4 @@ rather than null.
 
 ## Licence
 
-Apache-2.0. See `LICENSE` and `NOTICE`. Engine © Nicholas Breinich (nickb808).
+Apache-2.0. See `LICENSE` and `NOTICE`. Engine © Nick Breinich (nickb808).
