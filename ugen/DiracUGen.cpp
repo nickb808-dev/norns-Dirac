@@ -85,8 +85,10 @@ static inline bool isAudioRateInlet(int i) { return i == kIn || i == kFire; }
 struct Dirac : public Unit {
     dirac::Dirac *engine;
     bool          live;        // false => refusing to run; output silence
-    // Scalar inputs promoted to a full block, for the two per-sample inlets.
-    // RTAlloc'd because these ARE created on the audio thread.
+    // Private copies of the two per-sample inlets (kIn, kFire), refilled every
+    // block: a copy of the wire when it is audio rate, the scalar fanned out
+    // when it is not. RTAlloc'd because these ARE created on the audio thread.
+    // Why the copy is mandatory, not an optimisation: see Dirac_next.
     float        *fanBuf[2];
 };
 
@@ -202,26 +204,40 @@ void Dirac_next(Dirac *unit, int inNumSamples)
     }
 
     dirac::Dirac *d = unit->engine;
-    int fan = 0;
 
     for (int i = 0; i < kNumInlets; ++i) {
         od::Port *p = portFor(d, i);
         if (!p) continue;
 
         if (isAudioRateInlet(i)) {
+            // NEVER point the engine at an audio-rate IN(i) directly.
+            //
+            // scsynth reuses wire buffers: when this UGen is the last reader of
+            // an input wire, the graph builder may hand that SAME buffer to the
+            // UGen as OUT(0) or OUT(1). Writing the output then overwrites the
+            // input. The engine writes its outlets as it goes, so with aliasing
+            // it reads back its own output (zeros, at first) as input, and the
+            // whole unit goes permanently silent - even at mix 0.
+            //
+            // Measured on the norns: `Dirac.ar(src)` with src used by nothing
+            // else is silent; the same graph with src also metered passes it
+            // perfectly. Engine_Dirac hit this through `K2A.ar(fire)`, whose
+            // wire only Dirac reads. The stub scsynth gives every wire its own
+            // buffer, which is why no off-device test could see it.
+            //
+            // So every per-sample inlet is copied into a private buffer before
+            // process() runs, and the engine never sees a wire it could clobber.
+            float *b = unit->fanBuf[i == kIn ? 0 : 1];
             if (INRATE(i) == calc_FullRate) {
-                // const_cast is safe: the engine only READS inlets. Ports are a
-                // single type for in and out, which is what forces this.
-                p->point(const_cast<float *>(IN(i)));
+                memcpy(b, IN(i), FRAMELENGTH * sizeof(float));
             } else {
                 // A control-rate or scalar wire is one float long. The engine
                 // reads FRAMELENGTH of them, so fan the value out rather than
                 // reading off the end of the wire.
-                float *b = unit->fanBuf[fan++];
                 const float v = IN0(i);
                 for (int s = 0; s < FRAMELENGTH; ++s) b[s] = v;
-                p->point(b);
             }
+            p->point(b);
         } else {
             // Read as buffer()[0] only — verified against the engine source —
             // so a 1-float control wire is exactly enough.

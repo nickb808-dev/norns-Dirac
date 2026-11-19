@@ -270,10 +270,18 @@ static void renderBare(std::vector<float> &L, std::vector<float> &R, int blocks,
 
 static void renderWrapped(std::vector<float> &L, std::vector<float> &R, int blocks,
                           const CtlVal *ctls, int nCtls, float fireVal,
-                          bool fireAudioRate = true)
+                          bool fireAudioRate = true, bool alias = false)
 {
     Host h;
     h.build(FRAMELENGTH, fireAudioRate);
+    // alias: do what scsynth's wire allocator does when this UGen is the last
+    // reader of an input - hand it that SAME buffer as an output. OUT(0) shares
+    // memory with IN(kIn) and OUT(1) with IN(kFire), so any write to an outlet
+    // before the inlet has been fully read corrupts the input.
+    if (alias) {
+        h.outPtrs[0] = h.inBufs[kIn].data();
+        h.outPtrs[1] = h.inBufs[kFire].data();
+    }
     h.ctor();
     for (int i = 0; i < nCtls; ++i) h.set(ctls[i].idx, ctls[i].v);
     h.set(kFire, fireVal);
@@ -286,9 +294,13 @@ static void renderWrapped(std::vector<float> &L, std::vector<float> &R, int bloc
         for (int s = 0; s < FRAMELENGTH; ++s)
             h.inBufs[kIn][s] = 0.5f * sinf(2.0f * 3.14159265f * 110.0f *
                                            (b * FRAMELENGTH + s) / 48000.0f);
+        // Upstream UGens rewrite their wires every block; with aliasing the
+        // previous block's output is sitting in them, so refill Fire too.
+        if (alias) h.set(kFire, fireVal);
         h.run(FRAMELENGTH);
-        L.insert(L.end(), h.outBufs[0].begin(), h.outBufs[0].end());
-        R.insert(R.end(), h.outBufs[1].begin(), h.outBufs[1].end());
+        const float *oL = h.outPtrs[0], *oR = h.outPtrs[1];
+        L.insert(L.end(), oL, oL + FRAMELENGTH);
+        R.insert(R.end(), oR, oR + FRAMELENGTH);
     }
     h.dtor();
 }
@@ -457,6 +469,26 @@ int main()
         for (int i = 0; i < 20; ++i) { Host h; h.build(FRAMELENGTH); h.ctor(); h.run(FRAMELENGTH); h.dtor(); }
         char d[128]; snprintf(d, sizeof d, "RT blocks %d -> %d", before, gRtBlocks);
         report("noleak", gRtBlocks == before, d);
+    }
+
+    // 8. outputs ALIASED onto the audio-rate inputs, as scsynth really does it.
+    //    Found on the norns, not here: with OUT sharing IN's buffer the unit
+    //    went permanently silent, even at mix 0, and every test above passed
+    //    because this stub gave each wire its own buffer. The wrapper must copy
+    //    its per-sample inlets before process(); this checks it does, against
+    //    the bare engine, sample for sample.
+    {
+        std::vector<float> bL, bR, wL, wR;
+        renderBare(bL, bR, kProbeBlocks, kCtls, kNumCtls, 0.0f);
+        renderWrapped(wL, wR, kProbeBlocks, kCtls, kNumCtls, 0.0f,
+                      /*fireAudioRate=*/true, /*alias=*/true);
+        double md = 0, md2 = 0;
+        bool ok = same(bL, wL, &md) && same(bR, wR, &md2);
+        bool nonzero = false;
+        for (float v : wL) if (v != 0.0f) { nonzero = true; break; }
+        char d[160]; snprintf(d, sizeof d, "OUT shares IN's buffer: max|diff| L=%.3g R=%.3g%s",
+                              md, md2, nonzero ? "" : ", PURE SILENCE");
+        report("aliased", ok && nonzero, d);
     }
 
     printf("%s\n", gFails ? "FAILED" : ">>> Dirac: all wiring tests passed");
