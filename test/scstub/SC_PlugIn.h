@@ -35,8 +35,14 @@ struct UnitInput {
     int mCalcRate;
 };
 
+// Real scsynth: Unit::mParent is a Graph*, and a Graph's FIRST member is its
+// Node. SendReply-style UGens address their replies to &unit->mParent->mNode.
+struct Node  { int mID; };
+struct Graph { Node mNode; };
+
 struct Unit {
     World        *mWorld;
+    Graph        *mParent;
     int           mNumInputs, mNumOutputs;
     UnitCalcFunc  mCalcFunc;
     int           mBufLength;
@@ -69,10 +75,13 @@ struct InterfaceTable {
 #define RTAlloc(world, size) scstub_rtalloc(world, size)
 #define RTFree(world, ptr)   scstub_rtfree(world, ptr)
 #define Print                scstub_print
+#define SendNodeReply        scstub_sendnodereply
 
 void *scstub_rtalloc(World *w, size_t n);
 void  scstub_rtfree(World *w, void *p);
 void  scstub_print(const char *fmt, ...);
+// Records each reply so the driver can check what the UGen would send.
+void  scstub_sendnodereply(Node *node, int replyID, const char *cmd, int n, const float *values);
 
 static inline void ClearUnitOutputs(Unit *unit, int n)
 {

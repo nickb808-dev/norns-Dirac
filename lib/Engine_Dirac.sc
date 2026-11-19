@@ -32,6 +32,8 @@ Engine_Dirac : CroneEngine {
 	var <synth;
 	// Meter state. Written by the OSCFunc below, read by the polls.
 	var <meter;
+	// Display data from the UGen (SendNodeReply), forwarded to matron.
+	var <vizFwd, <waveFwd, <matron;
 	var <inAmp = 0, <outAmp = 0;
 
 	*new { arg context, doneCallback;
@@ -138,6 +140,19 @@ Engine_Dirac : CroneEngine {
 			outAmp = msg[4];
 		}, '/dirac_amp', srv.addr);
 
+		// The grain field. The UGen sends /dirac_viz (~30 Hz) and /dirac_wave
+		// (~4 Hz) to sclang; matron, the Lua process, listens for OSC on
+		// 10111 and hands it to the script's osc.event. A reply arrives as
+		// [path, nodeID, replyID, values...], so strip the first three.
+		// Payload layout: see ugen/DiracUGen.cpp, "display data".
+		matron = NetAddr("127.0.0.1", 10111);
+		vizFwd = OSCFunc({ arg msg;
+			matron.sendMsg('/dirac/viz', *msg.copyToEnd(3));
+		}, '/dirac_viz', srv.addr);
+		waveFwd = OSCFunc({ arg msg;
+			matron.sendMsg('/dirac/wave', *msg.copyToEnd(3));
+		}, '/dirac_wave', srv.addr);
+
 		this.addPoll(\in_amp,  { inAmp });
 		this.addPoll(\out_amp, { outAmp });
 
@@ -164,6 +179,8 @@ Engine_Dirac : CroneEngine {
 
 	free {
 		meter.free;
+		vizFwd.free;
+		waveFwd.free;
 		synth.free;
 	}
 }

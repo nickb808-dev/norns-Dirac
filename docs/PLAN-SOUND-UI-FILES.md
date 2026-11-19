@@ -224,7 +224,11 @@ without extra code.
    gain / L+R/L/R / LeakDC. Verified on the device through the REPL.)*
 4. **A3** `portcheck` on the Pi (one command). *(Done 2026-11-18: PASS, -99.3 dBFS.)*
 5. **B:** pages and controls first with a placeholder field, then the viz data
-   path, then the waveform.
+   path, then the waveform. *(Done 2026-11-18: eight pages with main/alt pairs,
+   K2 tap = hold / K2 held = fine, K3 fire, K1+K2 field view; the UGen streams
+   grains at ~30 Hz and live-ring peaks at ~4 Hz via SendNodeReply -> sclang ->
+   matron OSC. Waveform peaks are the input as written, not the ring with
+   feedback; that needs C2's getter. matron 5.5% CPU, no xruns.)*
 6. **C1** load, then **C2** capture via the upstream getter.
 7. **A2** only if you want to compare characters.
 

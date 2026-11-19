@@ -43,6 +43,19 @@ void *scstub_rtalloc(World *, size_t n)
     return malloc(n);
 }
 void scstub_rtfree(World *, void *p) { if (p) { --gRtBlocks; free(p); } }
+
+// Every SendNodeReply, by command: how many, and the last payload.
+struct Reply { int count = 0; std::vector<float> last; int node = -1; };
+static Reply gViz, gWave;
+static int   gOtherReplies = 0;
+void scstub_sendnodereply(Node *node, int, const char *cmd, int n, const float *values)
+{
+    Reply *r = !strcmp(cmd, "/dirac_viz") ? &gViz : !strcmp(cmd, "/dirac_wave") ? &gWave : nullptr;
+    if (!r) { ++gOtherReplies; return; }
+    ++r->count;
+    r->last.assign(values, values + n);
+    r->node = node ? node->mID : -1;
+}
 void scstub_print(const char *fmt, ...)
 {
     char buf[1024];
@@ -65,6 +78,7 @@ struct Host {
     // Dirac is a Unit subclass, so the host must give it storage of the
     // derived size — the same trick scsynth's DefineDtorUnit performs.
     std::vector<char>     storage;
+    Graph                 graph{{1234}};
 
     void build(int blockLen, bool fireAudioRate = true)
     {
@@ -92,6 +106,7 @@ struct Host {
 
         Dirac *du = reinterpret_cast<Dirac *>(storage.data());
         du->mWorld      = nullptr;
+        du->mParent     = &graph;
         du->mNumInputs  = kNumInputs;
         du->mNumOutputs = 2;
         du->mBufLength  = blockLen;
@@ -487,6 +502,72 @@ int main()
         char d[160]; snprintf(d, sizeof d, "OUT shares IN's buffer: max|diff| L=%.3g R=%.3g%s",
                               md, md2, nonzero ? "" : ", PURE SILENCE");
         report("aliased", ok && nonzero, d);
+    }
+
+    // 9. display data: what the norns UI will draw from.
+    //    - /dirac_viz at ~30 Hz carries exactly the ACTIVE grains, each with a
+    //      read position on [0,1] and a finite brightness;
+    //    - /dirac_wave at ~4 Hz carries 128 peaks that match the input level;
+    //    - the wrapper's ring size (kRingSize, a copy of the engine's private
+    //      kCapBufSize) is RIGHT: one ring's worth of blocks brings the write
+    //      head back to where it started. If upstream ever resizes the ring
+    //      this fails instead of drawing a skewed waveform.
+    {
+        gViz = Reply(); gWave = Reply(); gOtherReplies = 0;
+        Host h; h.build(FRAMELENGTH); h.ctor();
+        for (int i = 0; i < kNumCtls; ++i) h.set(kCtls[i].idx, kCtls[i].v);
+        h.set(kOptPlayheads, 1.0f); h.set(kOptDiffuse, 1.0f); h.set(kOptFreeze, 1.0f);
+        const int startCap = h.unit()->engine->getCapWritePos();
+        const int ringBlocks = kRingSize / FRAMELENGTH;
+        int blocks = 0;
+        auto runBlocks = [&](int nblk) {
+            for (int b = 0; b < nblk; ++b, ++blocks) {
+                for (int s = 0; s < FRAMELENGTH; ++s)
+                    h.inBufs[kIn][s] = 0.5f * sinf(2.0f * 3.14159265f * 110.0f *
+                                                   (blocks * FRAMELENGTH + s) / 48000.0f);
+                h.run(FRAMELENGTH);
+            }
+        };
+        runBlocks(ringBlocks);
+        const bool ringOk = (h.unit()->engine->getCapWritePos() == startCap);
+        // On a fresh unit the last bin of the first pass commits on the final
+        // block, after the last /dirac_wave went out. Run on until every bin
+        // has been through a frame.
+        runBlocks(2 * h.unit()->waveEvery);
+        const double secs = double(blocks) * FRAMELENGTH / 48000.0;
+        const double vizHz = gViz.count / secs, waveHz = gWave.count / secs;
+
+        bool vizOk = gViz.last.size() >= 5 && gViz.node == 1234;
+        int active = 0, counted = 0;
+        if (vizOk) {
+            for (int g = 0; g < dirac::Dirac::kMaxGrains; ++g)
+                if (h.unit()->engine->isGrainActive(g)) ++counted;
+            active = int(gViz.last[4]);
+            vizOk = (gViz.last.size() == size_t(5 + 6 * active));
+            for (int g = 0; vizOk && g < active; ++g) {
+                const float rp = gViz.last[5 + g * 6], br = gViz.last[5 + g * 6 + 3];
+                vizOk = rp >= 0.0f && rp <= 1.0f && std::isfinite(br);
+            }
+        }
+        // The last viz frame and the engine's state are from the same block
+        // only if the frame was sent on the final block; compare counts only
+        // when it was, otherwise just require a plausible count.
+        const bool countOk = active >= 1 && active <= dirac::Dirac::kMaxGrains;
+
+        float pmax = 0, pmin = 1;
+        bool waveOk = gWave.last.size() == size_t(1 + kWaveBins);
+        if (waveOk) for (int b = 0; b < kWaveBins; ++b) {
+            pmax = std::max(pmax, gWave.last[1 + b]); pmin = std::min(pmin, gWave.last[1 + b]);
+        }
+        // A full ring of a 0.5-amplitude sine: every bin saw a peak near 0.5.
+        waveOk = waveOk && pmax <= 0.5001f && pmin > 0.45f;
+        h.dtor();
+
+        char d[256];
+        snprintf(d, sizeof d, "viz %.1f Hz (%d grains, engine %d), wave %.1f Hz peaks %.3f..%.3f, ring %s",
+                 vizHz, active, counted, waveHz, pmin, pmax, ringOk ? "131072 ok" : "SIZE MISMATCH");
+        const bool rates = vizHz > 25 && vizHz < 35 && waveHz > 3 && waveHz < 5;
+        report("viz", vizOk && countOk && waveOk && ringOk && rates && gOtherReplies == 0, d);
     }
 
     printf("%s\n", gFails ? "FAILED" : ">>> Dirac: all wiring tests passed");

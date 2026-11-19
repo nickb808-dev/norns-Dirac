@@ -41,6 +41,7 @@
 #include <Dirac.h>
 #include <od/objects/Object.h>
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -81,6 +82,29 @@ static inline bool isAudioRateInlet(int i) { return i == kIn || i == kFire; }
 // with "UGen 'Dirac' not installed" — a failure that points at the server, not
 // at this line. (It was DiracUGen here and Dirac there. Fixed.)
 //
+// ─── display data ─────────────────────────────────────────────────────────────
+// The norns UI draws the grain field from the engine's public read-only state
+// (the same getters the ER-301's own field view uses). The wrapper sends it to
+// sclang with SendNodeReply - the mechanism SendReply uses - at display rate:
+//
+//   /dirac_viz  ~30 Hz   [sampleMode, frozen, capWrite, headPos01, nActive,
+//                         then per ACTIVE grain: readPos01, spawnPos01,
+//                         pitchSemi, brightness, pan, reverse]
+//   /dirac_wave  ~4 Hz   [capWrite, then kWaveBins peaks]
+//
+// Waveform peaks are |input| per kWaveBinLen samples, indexed by ABSOLUTE ring
+// position, so the UI rotates them against capWrite. They are the input as
+// written, not the ring's contents: with Feedback up the ring also holds the
+// regenerated signal, which only an engine getter can show (planned upstream:
+// getCapData()). Live mode only; sample-mode peaks come from the file.
+static constexpr int kRingSize    = 131072;  // == Dirac::kCapBufSize (private); see above
+static constexpr int kWaveBins    = 128;     // one per screen column
+static constexpr int kWaveBinLen  = kRingSize / kWaveBins;   // 1024
+static constexpr int kVizHz       = 30;
+static constexpr int kWaveHz      = 4;
+static constexpr int kVizPerGrain = 6;
+static constexpr int kVizHeader   = 5;
+
 // Unqualified `Dirac` is this wrapper's unit. The engine is always `dirac::Dirac`.
 struct Dirac : public Unit {
     dirac::Dirac *engine;
@@ -90,6 +114,15 @@ struct Dirac : public Unit {
     // when it is not. RTAlloc'd because these ARE created on the audio thread.
     // Why the copy is mandatory, not an optimisation: see Dirac_next.
     float        *fanBuf[2];
+
+    // Display state. Plain arrays: scsynth allocates the unit struct itself,
+    // so these cost no RTAlloc.
+    int           vizEvery, waveEvery;       // in blocks
+    int           vizCountdown, waveCountdown;
+    float         peaks[kWaveBins];
+    float         binPeak;                   // the bin being written, until it completes
+    float         vizMsg[kVizHeader + dirac::Dirac::kMaxGrains * kVizPerGrain];
+    float         waveMsg[1 + kWaveBins];
 };
 
 static void Dirac_next(Dirac *unit, int inNumSamples);
@@ -140,6 +173,14 @@ void Dirac_Ctor(Dirac *unit)
     unit->live       = false;
     unit->fanBuf[0]  = nullptr;
     unit->fanBuf[1]  = nullptr;
+    // Blocks per display frame. Server-rate derived, never zero.
+    const double blocksPerSec = SAMPLERATE / double(BUFLENGTH > 0 ? BUFLENGTH : 64);
+    unit->vizEvery  = blocksPerSec / kVizHz  >= 1.0 ? int(blocksPerSec / kVizHz)  : 1;
+    unit->waveEvery = blocksPerSec / kWaveHz >= 1.0 ? int(blocksPerSec / kWaveHz) : 1;
+    unit->vizCountdown  = unit->vizEvery;
+    unit->waveCountdown = unit->waveEvery;
+    memset(unit->peaks, 0, sizeof(unit->peaks));
+    unit->binPeak = 0.0f;
 
     // (3) above. A mismatch here is the single most likely cause of a render
     // that diverges wildly rather than subtly, so say so in words: a silent
@@ -251,7 +292,62 @@ void Dirac_next(Dirac *unit, int inNumSamples)
     d->mOutL.point(OUT(0));
     d->mOutR.point(OUT(1));
 
+    const int  capBefore = d->getCapWritePos();
+    const bool frozen    = d->getFreezeOn();
+    const bool sampleMode = d->isSampleMode();
+
     d->process();
+
+    // Waveform peaks, in step with the ring the engine just wrote. Uses the
+    // private input copy (fanBuf[0]): OUT(0) may alias the input wire, and by
+    // now it holds output.
+    //
+    // A bin's peak is committed when its LAST sample is written. Resetting it
+    // on entry instead (the first version) showed a gap at the write head in
+    // every frame - the ugentest `viz` case caught it at 64. Committing late
+    // shows the previous pass of that bin for up to 21 ms, which is invisible.
+    if (!frozen && !sampleMode) {
+        const float *in = unit->fanBuf[0];
+        for (int s = 0; s < FRAMELENGTH; ++s) {
+            const int idx = (capBefore + s) & (kRingSize - 1);
+            const float a = fabsf(in[s]);
+            if (a > unit->binPeak) unit->binPeak = a;
+            if ((idx % kWaveBinLen) == kWaveBinLen - 1) {
+                unit->peaks[idx / kWaveBinLen] = unit->binPeak;
+                unit->binPeak = 0.0f;
+            }
+        }
+    }
+
+    if (--unit->vizCountdown <= 0) {
+        unit->vizCountdown = unit->vizEvery;
+        float *m = unit->vizMsg;
+        int n = kVizHeader;
+        int active = 0;
+        for (int g = 0; g < dirac::Dirac::kMaxGrains; ++g) {
+            if (!d->isGrainActive(g)) continue;
+            m[n++] = d->getGrainReadPos01(g);
+            m[n++] = d->getGrainSpawnPos01(g);
+            m[n++] = d->getGrainPitch(g);
+            m[n++] = d->getGrainEnvelope(g) * d->getGrainGain(g);
+            m[n++] = d->getGrainPan(g);
+            m[n++] = d->getGrainReverse(g) ? 1.0f : 0.0f;
+            ++active;
+        }
+        m[0] = sampleMode ? 1.0f : 0.0f;
+        m[1] = d->getFreezeOn() ? 1.0f : 0.0f;
+        m[2] = float(d->getCapWritePos());        // < 2^24: exact in a float
+        m[3] = (sampleMode && d->mEndIndex > 0) ? float(d->getPosition()) / float(d->mEndIndex) : 0.0f;
+        m[4] = float(active);
+        SendNodeReply(&unit->mParent->mNode, -1, "/dirac_viz", n, m);
+    }
+
+    if (--unit->waveCountdown <= 0) {
+        unit->waveCountdown = unit->waveEvery;
+        unit->waveMsg[0] = float(d->getCapWritePos());
+        memcpy(unit->waveMsg + 1, unit->peaks, sizeof(unit->peaks));
+        SendNodeReply(&unit->mParent->mNode, -1, "/dirac_wave", 1 + kWaveBins, unit->waveMsg);
+    }
 
     // Ports borrow scsynth's wires, which are only valid inside this call.
     // Parking them stops a stale pointer from being reachable if the engine is
