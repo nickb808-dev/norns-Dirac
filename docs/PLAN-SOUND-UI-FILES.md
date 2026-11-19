@@ -218,7 +218,10 @@ without extra code.
    `PAPPUS-VS-DIRAC.md` §4 and the README status. *(Done 2026-11-18.)*
 2. **A0** engine sync to 0.2.12 (removes Color, fixes pitch). *(Done 2026-11-18.)*
 3. **A1 quick wins**, then a listening check: does it play better while still
-   sounding like itself?
+   sounding like itself? *(Done 2026-11-18, except the listening check: 200
+   detents per range plus K1 fine, exponential grain length, step-matched
+   display, named scale/shape, hold as a toggle, fire as a trigger, input
+   gain / L+R/L/R / LeakDC. Verified on the device through the REPL.)*
 4. **A3** `portcheck` on the Pi (one command). *(Done 2026-11-18: PASS, -99.3 dBFS.)*
 5. **B:** pages and controls first with a placeholder field, then the viz data
    path, then the waveform.
@@ -230,5 +233,13 @@ without extra code.
 - **Sound:** clear optimizations only; keep the norns character (2026-11-18).
 - **Color:** removed, via the upstream 0.2.12 sync (2026-11-18).
 - **Option params show names, not integers** (scale, shape) (2026-11-18).
+- **On/off controls are visible toggles, never decimals** (2026-11-18).
+  Hold is a `binary` param now; in the UI it gets a drawn on/off state (a lit
+  box or snowflake), the same treatment for Freeze, Diffuse and any later
+  on/off control. Applies to the B pages: no on/off control is shown as a
+  number.
+- **Fire stays,** as a trigger (2026-11-18). It needs no audio input: K3, a
+  MIDI-mapped note or a norns clock can fire it. At density 0 it is the only
+  way grains spawn.
 - **Capture:** an upstream read-only `getCapData()` getter, not a dry-input
   recording (2026-11-18).

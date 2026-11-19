@@ -65,6 +65,7 @@ Engine_Dirac : CroneEngine {
 
 		synth = {
 			arg out = 0, inbusl = 0, inbusr = 1,
+			    ingain = 0, insrc = 1,
 			    playhead = 0.0, speed = 0.0, rate = 3.0, grains = 12, grainlen = 0.05,
 			    posjtr = 0.0, revprob = 0.0, semishift = 0, voct = 0.0, psprd = 0.0,
 			    scale = 0, window = 0, texture = 0.5, tilt = 0.0, tiltspread = 0.0,
@@ -73,11 +74,20 @@ Engine_Dirac : CroneEngine {
 			    mix = 1.0, feedback = 0.0, level = 0.7, fire = 0.0, hold = 0.0,
 			    playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;
 
-			// The engine's input is MONO - one od::Inlet. Sum the pair and halve
-			// rather than dropping the right channel: halving keeps a centred
-			// mono source at unity instead of 6 dB hot into the capture ring,
-			// which feeds the feedback path.
-			var src = (In.ar(inbusl, 1) + In.ar(inbusr, 1)) * 0.5;
+			// The engine's input is MONO - one od::Inlet. insrc picks how the
+			// pair becomes one channel:
+			//   1 L+R  average; a centred stereo source stays at unity rather
+			//          than 6 dB hot into the capture ring, which feeds the
+			//          feedback path
+			//   2 L    left alone, at unity - a mono cable in one jack would
+			//   3 R    lose 6 dB to the average
+			var inl = In.ar(inbusl, 1);
+			var inr = In.ar(inbusr, 1);
+			// LeakDC: the ER-301 chain is DC-free by construction; a norns
+			// codec is not, and DC parked in a feedback ring pumps.
+			// Lag on the gain so turning it does not zipper.
+			var src = LeakDC.ar(Select.ar((insrc - 1).clip(0, 2),
+				[(inl + inr) * 0.5, inl, inr])) * Lag.kr(ingain.dbamp, 0.05);
 
 			// Fire is one of only two inlets the engine reads PER SAMPLE, so
 			// expand it explicitly: a gate then lands on the sample it was sent
@@ -134,6 +144,7 @@ Engine_Dirac : CroneEngine {
 		// One command per parameter. tools/check-params.sh reads these symbols
 		// and compares them against lib/params.lua.
 		[
+			\ingain, \insrc,
 			\playhead, \speed, \rate, \grains, \grainlen, \posjtr, \revprob,
 			\semishift, \voct, \psprd, \scale, \window, \texture, \tilt,
 			\tiltspread, \heads, \headspread, \headtune, \snap,

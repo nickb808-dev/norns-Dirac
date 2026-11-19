@@ -23,11 +23,9 @@ pgrep_o() { PAT="$1" perl -ne 'while (/$ENV{PAT}/g) { print "$&\n" }' "${@:2}"; 
 cd "$(dirname "$0")/.." || exit 2
 fail=0
 
-# The three menu OPTIONS live in dirac.lua rather than lib/params.lua, because
-# they are add_option not add_control. They still need commands, so they are
-# part of the same comparison.
-lua_ids=$( { pgrep_o '^\s*\{\s*id\s*=\s*"\K[a-zA-Z]+' lib/params.lua
-             pgrep_o '^\s*\{\s*id\s*=\s*"\K[a-zA-Z]+Opt' dirac.lua; } | sort -u)
+# Every kind (control, option, toggle, trigger) lives in lib/params.lua, the
+# three od::Option menus included, so one extraction covers them all.
+lua_ids=$(pgrep_o '^\s*\{\s*id\s*=\s*"\K[a-zA-Z]+' lib/params.lua | sort -u)
 
 # addCommand names come from the two symbol lists, not from a literal string,
 # so extract the symbols inside the two .do { } blocks.

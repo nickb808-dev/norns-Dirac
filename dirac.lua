@@ -5,9 +5,9 @@
 --
 -- E2 select parameter
 -- E3 change value
+-- K1 held + E3: fine
 -- E1 jump by section
 -- K2/K3 page up/down
--- K1 for norns menu
 --
 -- phase 2: a flat scrolling
 -- list. the cell UI is next.
@@ -17,14 +17,6 @@ engine.name = "Dirac"
 -- Relative to this script's own folder, so the install folder can be named
 -- anything (it is `dirac` on the device; the repo is `norns-dirac`).
 local SPEC = include("lib/params")
-
-local OPTIONS = {
-  -- 1-based, matching od::OptionControl on the ER-301. The engine compares
-  -- against literal 1/2/3, so index 0 would select nothing at all.
-  { id = "playheadsOpt", name = "playheads",  choices = { "single", "multi" },  default = 1 },
-  { id = "diffuseOpt",   name = "diffuse",    choices = { "off", "on" },        default = 1 },
-  { id = "freezeOpt",    name = "capture",    choices = { "run", "freeze" },    default = 1 },
-}
 
 -- The on-screen list: every control, then every option. Built from the same
 -- tables the params menu is built from, so the two cannot drift.
@@ -49,9 +41,33 @@ local function send(id, value)
   end
 end
 
+-- Display precision that matches the step, so a detent always changes what is
+-- on screen. norns' default rounds every control to 0.01, which hid the new
+-- steps entirely (grain length read "0.05 s" from 50 ms to 54 ms).
+local function formatter_for(p, quantum)
+  local unit = p.unit and (" " .. p.unit) or ""
+  if p.unit == "s" then
+    -- Seconds below one second read better as milliseconds, with the
+    -- precision a ~3.5% exponential step needs at that size.
+    return function(param)
+      local v = param:get()
+      if v >= 1 then return string.format("%.2f s", v) end
+      local ms = v * 1000
+      if ms < 10 then return string.format("%.2f ms", ms) end
+      if ms < 100 then return string.format("%.1f ms", ms) end
+      return string.format("%.0f ms", ms)
+    end
+  end
+  local stepsize = (p.step and p.step > 0) and p.step or (p.max - p.min) * quantum
+  local decimals = util.clamp(math.ceil(-math.log(stepsize, 10) - 1e-9), 0, 3)
+  local f = "%." .. decimals .. "f"
+  return function(param) return string.format(f, param:get()) .. unit end
+end
+
 local LIST = {}
 local sel = 1
 local dirty = true
+local k1_held = false   -- K1 held = fine adjust (x0.1 per detent)
 
 -- ── meters ───────────────────────────────────────────────────────────────────
 -- Fed by the engine's in_amp / out_amp polls. These exist because this engine
@@ -79,27 +95,45 @@ function init()
   -- the ranges cannot drift from the ER-301's. A hand-written second copy is
   -- exactly how Speed, Heads, Grains and Tilt ended up wrong the first time.
   for _, p in ipairs(SPEC) do
-    local step = p.step or 0
-    params:add_control(
-      p.id, p.name,
-      controlspec.new(p.min, p.max, p.warp or "lin", step, p.default, p.unit or ""))
-    params:set_action(p.id, function(x)
-      send(p.id, x)
-      dirty = true
-    end)
-    table.insert(LIST, { id = p.id, name = p.name, kind = "control" })
+    local kind = p.kind or "control"
+    if kind == "control" then
+      local step = p.step or 0
+      -- quantum is a fraction of the RANGE per detent. Integer dials move one
+      -- whole unit per detent; everything else gets p.detents (default 200).
+      local quantum = (step > 0) and (step / (p.max - p.min)) or (1 / (p.detents or 200))
+      params:add_control(p.id, p.name,
+        controlspec.new(p.min, p.max, p.warp or "lin", step, p.default, p.unit or "", quantum),
+        formatter_for(p, quantum))
+      params:set_action(p.id, function(x) send(p.id, x); dirty = true end)
+    elseif kind == "option" then
+      -- The menu shows names; the engine gets base + (index - 1).
+      local base = p.base or 1
+      params:add_option(p.id, p.name, p.options, p.default or 1)
+      params:set_action(p.id, function(i) send(p.id, base + i - 1); dirty = true end)
+    elseif kind == "toggle" then
+      params:add_binary(p.id, p.name, "toggle", p.default or 0)
+      params:set_action(p.id, function(v) send(p.id, v); dirty = true end)
+    elseif kind == "trigger" then
+      -- A rising edge is what the engine listens for. Send the edge, then
+      -- drop back to 0 a moment later so the next press is a new edge.
+      params:add_trigger(p.id, p.name)
+      params:set_action(p.id, function()
+        send(p.id, 1)
+        clock.run(function() clock.sleep(0.02); send(p.id, 0) end)
+        dirty = true
+      end)
+    end
+    table.insert(LIST, { id = p.id, name = p.name, kind = kind })
   end
 
-  for _, o in ipairs(OPTIONS) do
-    params:add_option(o.id, o.name, o.choices, o.default)
-    params:set_action(o.id, function(i)
-      send(o.id, i)
-      dirty = true
-    end)
-    table.insert(LIST, { id = o.id, name = o.name, kind = "option" })
+  -- bang() would also fire every trigger param, i.e. a grain burst at load.
+  -- Harmless, but it is not "restore the saved state", so send everything
+  -- except triggers.
+  for _, p in ipairs(SPEC) do
+    if (p.kind or "control") ~= "trigger" then
+      params:lookup_param(p.id):bang()
+    end
   end
-
-  params:bang()
 
   -- poll.set returns nil when the engine never registered the poll, which is
   -- precisely the case when the engine failed to load. Same rule as send():
@@ -148,12 +182,25 @@ function enc(n, d)
   elseif n == 2 then
     sel = util.clamp(sel + d, 1, #LIST)
   elseif n == 3 then
-    params:delta(LIST[sel].id, d)
+    local item = LIST[sel]
+    if item.kind == "trigger" then
+      if d > 0 then params:set(item.id, 1) end   -- any clockwise detent fires
+    elseif item.kind == "toggle" then
+      params:set(item.id, d > 0 and 1 or 0)
+    elseif k1_held and item.kind == "control" then
+      -- Fine: a tenth of a detent, in the param's own (possibly exponential)
+      -- 0..1 space, so it is a tenth of the step you'd otherwise get HERE.
+      local prm = params:lookup_param(item.id)
+      prm:set_raw(prm:get_raw() + d * prm.controlspec.quantum * 0.1)
+    else
+      params:delta(item.id, d)
+    end
   end
   dirty = true
 end
 
 function key(n, z)
+  if n == 1 then k1_held = (z == 1); dirty = true; return end
   if z ~= 1 then return end
   if n == 2 then
     sel = util.clamp(sel - ROWS, 1, #LIST)
@@ -201,7 +248,13 @@ function redraw()
       screen.move(0, y)
       screen.text(item.name)
       screen.move(127, y)
-      screen.text_right(params:string(item.id))
+      if item.kind == "toggle" then
+        screen.text_right(params:get(item.id) == 1 and "on" or "off")
+      elseif item.kind == "trigger" then
+        screen.text_right("E3 >")
+      else
+        screen.text_right(params:string(item.id))
+      end
     end
   end
 
