@@ -245,5 +245,9 @@ without extra code.
 - **Fire stays,** as a trigger (2026-11-18). It needs no audio input: K3, a
   MIDI-mapped note or a norns clock can fire it. At density 0 it is the only
   way grains spawn.
+- **Live field orientation stays "now at the right"** (2026-11-18): playhead
+  up moves the cloud left, into the past, as the engine and the ER-301 define
+  it. A tape-style flip (write head left) was offered and declined. Sample mode
+  will run left-to-right from the file's start.
 - **Capture:** an upstream read-only `getCapData()` getter, not a dry-input
   recording (2026-11-18).
