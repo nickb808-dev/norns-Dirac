@@ -107,7 +107,9 @@ return {
   { id = "fire",       name = "fire",        kind = "trigger" },
 
   -- ── menus (od::Option on the ER-301; 1-based) ─────────────────────────────
-  { id = "playheadsOpt", name = "playheads", kind = "option", options = { "single", "multi" },  base = 1, default = 1 },
+  -- The enable for multi-playhead. Off hard-bypasses heads / head spread /
+  -- head tune in the engine (mMultiHeadOpt), so the UI dims them while off.
+  { id = "playheadsOpt", name = "multi",     kind = "option", options = { "off", "on" },        base = 1, default = 1 },
   { id = "diffuseOpt",   name = "diffuse",   kind = "option", options = { "off", "on" },        base = 1, default = 1 },
   { id = "freezeOpt",    name = "capture",   kind = "option", options = { "run", "freeze" },    base = 1, default = 1 },
 }

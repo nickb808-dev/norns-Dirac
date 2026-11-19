@@ -71,7 +71,8 @@ local PAGES = {
   { name = "pitch", main = { "semishift", "psprd" },   alt = { "scale", "voct" } },
   { name = "tone",  main = { "texture", "tilt" },      alt = { "tiltspread", "snap" } },
   { name = "space", main = { "spread", "binaural" },   alt = { "detune", "diffuseOpt" } },
-  { name = "heads", main = { "heads", "headspread" },  alt = { "headtune", "playheadsOpt" } },
+  -- the enable switch and what it governs first, refinements under K1
+  { name = "heads", main = { "playheadsOpt", "heads" }, alt = { "headspread", "headtune" } },
   { name = "regen", main = { "feedback", "compress" }, alt = { "freezeOpt", "hold" } },
   { name = "out",   main = { "mix", "level" },         alt = { "ingain", "insrc" } },
 }
@@ -94,6 +95,28 @@ local in_amp, out_amp = 0, 0
 local viz = { sample = false, frozen = false, cap = 0, head = 0, texture = 0.5,
               srclen = 131072, grains = {} }
 local wave = { cap = 0, peaks = {} }
+-- Controls that only act while something else is set. The ER-301 reveals
+-- them when their switch is turned on; here they stay on their page but dim
+-- while inert, so the screen says so rather than letting a turn look broken.
+-- Each rule is the engine's own condition (engine/Dirac.cpp).
+local function multi_on() return params:get("playheadsOpt") == 2 end
+local ACTIVE_IF = {
+  -- mMultiHeadOpt Off hard-bypasses the multi-head path
+  heads = multi_on, headspread = multi_on, headtune = multi_on,
+  -- Speed scans a loaded sample (speed != 0 && sampleCount > 1); live, it is
+  -- inert
+  speed = function() return viz.sample end,
+  -- Scale quantises the pitch offset = scatter + head x head tune; with
+  -- neither there is nothing to snap
+  scale = function()
+    return params:get("psprd") > 0 or (multi_on() and params:get("headtune") ~= 0)
+  end,
+}
+local function active(id)
+  local rule = ACTIVE_IF[id]
+  return not rule or rule()
+end
+
 local RING = 131072      -- engine ring size; the UGen's test proves it
 local BINS = 128
 
@@ -419,7 +442,8 @@ end
 
 local function draw_param(x, id)
   local prm = params:lookup_param(id)
-  screen.level(4)
+  local on = active(id)
+  screen.level(on and 4 or 2)
   screen.move(x, 55)
   screen.text(prm.name)
   if KIND[id] == "toggle" then
@@ -428,7 +452,7 @@ local function draw_param(x, id)
     local on = params:get(id) == 2
     draw_toggle(x, 63, on and "on" or "off", on)
   else
-    screen.level(15)
+    screen.level(on and 15 or 3)
     screen.move(x, 63)
     screen.text(value_string(id))
   end
