@@ -8,6 +8,8 @@
 -- K2 tap: hold on/off
 -- K2 held + E2/E3: fine
 -- K3: fire
+-- K1 held + K3: save the
+--   buffer to a wav
 -- K1 held + K2: field x =
 --   position / stereo
 --
@@ -87,7 +89,7 @@ local PAGES = {
   { name = "space", main = { "spread", "binaural" },      alt = { "detune", "diffuseOpt" } },
   { name = "regen", main = { "feedback", "compress" },    alt = { "freezeOpt", "hold" } },
   { name = "out",   main = { "mix", "level" },            alt = { "insrc", "ingain" } },
-  { name = "file",  main = { "source", "sample" },        alt = { "unload" } },
+  { name = "file",  main = { "source", "sample" },        alt = { "unload", "capture" } },
 }
 local page = 1
 
@@ -180,6 +182,12 @@ local SCRIPT_ACTION = {
   unload = function()
     send("clearsample")
     params:set("source", 1)
+  end,
+  -- The engine copies the ring and writes the file; /dirac/captured reports
+  -- the path when it is on disk.
+  capture = function()
+    flash("saving buffer...")
+    send("capture")
   end,
 }
 
@@ -282,6 +290,10 @@ function osc.event(path, args, from)
     flash("loaded " .. tostring(args[1]):match("[^/]*$"))
   elseif path == "/dirac/load_fail" then
     flash("can't read " .. tostring(args[1]):match("[^/]*$"))
+  elseif path == "/dirac/captured" then
+    flash("saved " .. tostring(args[1]):match("[^/]*$"):gsub("%.wav$", ""))
+  elseif path == "/dirac/capture_fail" then
+    flash("capture failed")
   elseif path == "/dirac/unloaded" then
     sample_loaded = false
     sample_peaks = {}
@@ -352,7 +364,7 @@ function key(n, z)
     end
   elseif n == 3 and z == 1 then
     if k1_held then
-      flash("capture: coming soon")
+      params:set("capture", 1)
     else
       params:set("fire", 1)
     end

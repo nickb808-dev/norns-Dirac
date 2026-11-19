@@ -68,12 +68,12 @@ n_wrap=$(sed -n '/od::Port \*portFor/,/^}/p' ugen/DiracUGen.cpp | grep -c 'retur
 n_opts=$(grep -c 'Opt\.set(' ugen/DiracUGen.cpp)
 # Wrapper-only inputs that are not engine inlets or options (the sample-mode
 # buffer number).
-n_extra=$(grep -c 'IN0(kBuf)' ugen/DiracUGen.cpp)
+n_extra=$(grep -oE 'IN0\(k(Buf|CapTrig|CapBuf)\)' ugen/DiracUGen.cpp | sort -u | wc -l | tr -d ' ')
 n_sc=$(sed -n '/\*ar {/,/multiNew/p' ugen/Dirac.sc.in \
        | pgrep_o '\b[a-zA-Z][a-zA-Z0-9]*\s*=' | wc -l)
 want=$((n_wrap + n_opts + n_extra))
 if [ "$n_sc" -eq "$want" ]; then
-    echo "check-ugen-names: OK    $n_sc SC arguments = $n_wrap inlets + $n_opts options + $n_extra buffer"
+    echo "check-ugen-names: OK    $n_sc SC arguments = $n_wrap inlets + $n_opts options + $n_extra wrapper inputs (sample buffer, capture)"
 else
     echo "check-ugen-names: FAIL  Dirac.sc declares $n_sc arguments, wrapper wants $want"
     echo "                        ($n_wrap inlets + $n_opts options + $n_extra buffer)"

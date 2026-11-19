@@ -37,6 +37,9 @@ Engine_Dirac : CroneEngine {
 	// Sample mode: the buffer the synth is reading, and a generation count so
 	// a slow peak scan of an old file cannot overwrite a newer one's.
 	var <sampleBuf, loadGen = 0;
+	// Capture: one mono buffer the size of the engine's ring, allocated once;
+	// the UGen copies the ring into it on a trigger and replies.
+	var <capBuf, capFwd, capPath;
 	var <inAmp = 0, <outAmp = 0;
 
 	*new { arg context, doneCallback;
@@ -66,6 +69,10 @@ Engine_Dirac : CroneEngine {
 		//
 		// srv is still used: .play needs the SynthDef sent, and CroneEngine's
 		// Routine makes that safe.
+		// 131072 = Dirac::kCapBufSize, the engine's live ring (2.73 s at 48k).
+		// The UGen refuses a buffer smaller than its ring, so a mismatch here
+		// shows up as "capture failed", never as a short or corrupt file.
+		capBuf = Buffer.alloc(srv, 131072, 1);
 		srv.sync;
 
 		synth = {
@@ -78,7 +85,7 @@ Engine_Dirac : CroneEngine {
 			    compress = 0.0, spread = 0.5, detune = 0.0, binaural = 0.0,
 			    mix = 1.0, feedback = 0.0, level = 0.7, fire = 0.0, hold = 0.0,
 			    playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1,
-			    source = 1, buf = -1;
+			    source = 1, buf = -1, t_capture = 0, capbuf = -1;
 
 			// The engine's input is MONO - one od::Inlet. insrc picks how the
 			// pair becomes one channel:
@@ -111,7 +118,9 @@ Engine_Dirac : CroneEngine {
 				// source 1 = live, 2 = sample. A sample that is selected but
 				// not loaded (buf -1) is live too: the UGen treats any invalid
 				// buffer as live.
-				Select.kr(source > 1.5, [-1, buf]));
+				Select.kr(source > 1.5, [-1, buf]),
+				// t_ = a trigger control: high for one block, then 0
+				t_capture, capbuf);
 
 			// METERS, and the reason they are worth the two UGens.
 			//
@@ -136,7 +145,8 @@ Engine_Dirac : CroneEngine {
 		}.play(args: [
 			\out,    context.out_b,
 			\inbusl, context.in_b[0].index,
-			\inbusr, context.in_b[1].index
+			\inbusr, context.in_b[1].index,
+			\capbuf, capBuf.bufnum
 		], target: context.xg);
 
 		// SendReply -> OSCFunc -> cached value -> addPoll. Bus.getSynchronous
@@ -164,8 +174,6 @@ Engine_Dirac : CroneEngine {
 		this.addPoll(\in_amp,  { inAmp });
 		this.addPoll(\out_amp, { outAmp });
 
-		// One command per parameter. tools/check-params.sh reads these symbols
-		// and compares them against lib/params.lua.
 		// Sample mode. Not params: these carry a path and a lifecycle, not a
 		// value (dirac.lua's `sample` file param drives them).
 		// NOT "load"/"unload": matron's engine table already has engine.load
@@ -175,6 +183,34 @@ Engine_Dirac : CroneEngine {
 		this.addCommand("loadsample", "s", { arg msg; this.loadSample(msg[1].asString); });
 		this.addCommand("clearsample", "", { this.unloadSample; });
 
+		// Capture the ring to ~/dust/audio/dirac/capture-YYMMDD_HHMMSS.wav.
+		// The UGen copies the ring (oldest first) into capBuf and replies; the
+		// file is written only on an ok reply, then matron is told where.
+		this.addCommand("capture", "", {
+			capPath = "/home/we/dust/audio/dirac/capture-" ++ Date.localtime.stamp ++ ".wav";
+			synth.set(\t_capture, 1);
+		});
+		capFwd = OSCFunc({ arg msg;
+			if (msg[3] > 0.5 and: { capPath.notNil }) {
+				var path = capPath;
+				capPath = nil;
+				fork {
+					File.mkdir("/home/we/dust/audio/dirac");
+					// 32-bit float: the ring can exceed 1.0 with feedback, and
+					// an integer file would clip what the grains are reading.
+					capBuf.write(path, "wav", "float");
+					srv.sync;
+					("Engine_Dirac: captured " ++ path).postln;
+					matron.sendMsg('/dirac/captured', path);
+				};
+			} {
+				"Engine_Dirac: capture failed".postln;
+				matron.sendMsg('/dirac/capture_fail');
+			};
+		}, '/dirac_captured', srv.addr);
+
+		// One command per parameter. tools/check-params.sh reads these symbols
+		// and compares them against lib/params.lua.
 		[
 			\ingain, \insrc, \source,
 			\playhead, \speed, \rate, \grains, \grainlen, \posjtr, \revprob,
@@ -260,6 +296,8 @@ Engine_Dirac : CroneEngine {
 	free {
 		meter.free;
 		if (sampleBuf.notNil) { sampleBuf.free; sampleBuf = nil };
+		capFwd.free;
+		if (capBuf.notNil) { capBuf.free; capBuf = nil };
 		vizFwd.free;
 		waveFwd.free;
 		synth.free;

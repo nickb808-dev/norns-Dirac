@@ -57,6 +57,9 @@ return {
   -- dirac.lua converts non-48 kHz files with sox, then calls engine.load().
   { id = "sample",     name = "sample",      kind = "file", script = true },
   { id = "unload",     name = "clear sample",kind = "trigger", script = true },
+  -- Saves the live ring (2.73 s, feedback included) to
+  -- ~/dust/audio/dirac/capture-YYMMDD_HHMMSS.wav. Also K1 + K3.
+  { id = "capture",    name = "save capture",kind = "trigger", script = true },
 
   -- ── source position ───────────────────────────────────────────────────────
   { id = "playhead",   name = "playhead",    min = 0.0,   max = 1.0,  default = 0.0  },

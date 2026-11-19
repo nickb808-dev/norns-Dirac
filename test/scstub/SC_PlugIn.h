@@ -36,6 +36,7 @@ struct World {
     SndBuf *mSndBufs;
 };
 #define LOCK_SNDBUF_SHARED(buf)
+#define LOCK_SNDBUF(buf)
 struct Unit;
 typedef void (*UnitCalcFunc)(struct Unit *unit, int inNumSamples);
 

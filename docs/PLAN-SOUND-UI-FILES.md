@@ -234,7 +234,11 @@ without extra code.
    files converted once by sox into ~/dust/audio/dirac/.cache; UGen buffer
    input with a per-block SndBuf refresh; the old buffer freed only after the
    synth has moved; sample peaks from the file in sclang. Verified on the
-   device with a 48 kHz mono drum and a 44.1 kHz stereo 79 s file.)*
+   device with a 48 kHz mono drum and a 44.1 kHz stereo 79 s file.)* *(C2 done
+   2026-11-18: K1+K3 or file page "save capture" writes the ring, oldest first,
+   to ~/dust/audio/dirac/capture-YYMMDD_HHMMSS.wav as 32-bit float; it loads
+   straight back as a sample. Waveform peaks now come from the ring, so
+   feedback shows.)*
 7. **A2** only if you want to compare characters.
 
 ## Decisions

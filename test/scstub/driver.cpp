@@ -46,11 +46,12 @@ void scstub_rtfree(World *, void *p) { if (p) { --gRtBlocks; free(p); } }
 
 // Every SendNodeReply, by command: how many, and the last payload.
 struct Reply { int count = 0; std::vector<float> last; int node = -1; };
-static Reply gViz, gWave;
+static Reply gViz, gWave, gCap;
 static int   gOtherReplies = 0;
 void scstub_sendnodereply(Node *node, int, const char *cmd, int n, const float *values)
 {
-    Reply *r = !strcmp(cmd, "/dirac_viz") ? &gViz : !strcmp(cmd, "/dirac_wave") ? &gWave : nullptr;
+    Reply *r = !strcmp(cmd, "/dirac_viz") ? &gViz : !strcmp(cmd, "/dirac_wave") ? &gWave
+             : !strcmp(cmd, "/dirac_captured") ? &gCap : nullptr;
     if (!r) { ++gOtherReplies; return; }
     ++r->count;
     r->last.assign(values, values + n);
@@ -101,6 +102,7 @@ struct Host {
             inputPtrs[i] = &inputSpecs[i];
         }
         inBufs[kBuf][0] = -1.0f;   // live unless a test says otherwise
+        inBufs[kCapBuf][0] = -1.0f;
         for (int c = 0; c < 2; ++c) {
             outBufs[c].assign(blockLen, 0.0f);
             outPtrs[c] = outBufs[c].data();
@@ -523,6 +525,10 @@ int main()
         Host h; h.build(FRAMELENGTH); h.ctor();
         for (int i = 0; i < kNumCtls; ++i) h.set(kCtls[i].idx, kCtls[i].v);
         h.set(kOptPlayheads, 1.0f); h.set(kOptDiffuse, 1.0f); h.set(kOptFreeze, 1.0f);
+        // Peaks are the RING's, so with feedback they include the regenerated
+        // signal (the capture test checks that). Here the check is "peaks
+        // match a known input", which needs feedback off.
+        h.set(kFeedback, 0.0f);
         const int startCap = h.unit()->engine->getCapWritePos();
         const int ringBlocks = kRingSize / FRAMELENGTH;
         int blocks = 0;
@@ -658,6 +664,76 @@ int main()
                  liveOnRange ? "ok" : "NO", liveOnEmpty ? "ok" : "NO");
         report("sample", same_out && nonzero && wasSample && srcLen == float(frames)
                && liveOnMinus && reattached && liveOnRange && liveOnEmpty, d);
+    }
+
+    // 11. capture: on a rising edge the ring lands in the buffer OLDEST FIRST,
+    //     so the file's last sample is the newest input; exactly once per
+    //     edge; a wrong-sized or unallocated buffer is refused (ok = 0), never
+    //     written. And the waveform now reads the ring: with feedback up,
+    //     peaks exceed what the input alone would give.
+    {
+        gCap = Reply();
+        const int N = kRingSize;
+        std::vector<float> capData(N, -9.0f), small(1000, -9.0f);
+        Host h;
+        SndBuf good{}; good.data = capData.data(); good.channels = 1; good.frames = N; good.samples = N;
+        SndBuf tiny{}; tiny.data = small.data();   tiny.channels = 1; tiny.frames = 1000; tiny.samples = 1000;
+        h.sndbufs = { good, tiny };
+        h.build(FRAMELENGTH); h.ctor();
+        for (int i = 0; i < kNumCtls; ++i) h.set(kCtls[i].idx, kCtls[i].v);
+        h.set(kOptPlayheads, 1.0f); h.set(kOptDiffuse, 1.0f); h.set(kOptFreeze, 1.0f);
+        h.set(kFeedback, 0.0f);
+        int blocks = 0; float lastIn = 0.0f;
+        auto runBlocks = [&](int nblk) {
+            for (int b = 0; b < nblk; ++b, ++blocks) {
+                for (int s = 0; s < FRAMELENGTH; ++s) {
+                    lastIn = 0.25f * sinf(2.0f * 3.14159265f * 97.0f * (blocks * FRAMELENGTH + s) / 48000.0f);
+                    h.inBufs[kIn][s] = lastIn;
+                }
+                h.run(FRAMELENGTH);
+            }
+        };
+        runBlocks(N / FRAMELENGTH + 37);          // wrap the ring, end mid-way
+        h.set(kCapBuf, 0.0f); h.set(kCapTrig, 1.0f); runBlocks(1);
+        const int capsAfterEdge = gCap.count;
+        runBlocks(3);                             // held high: no new capture
+        const bool once = (gCap.count == capsAfterEdge);
+        const bool okReply = gCap.last.size() == 2 && gCap.last[0] == 1.0f && gCap.last[1] == float(N);
+
+        // compare against the engine's ring at the moment of capture: the
+        // capture happened after the edge block's process(), and 3 more
+        // blocks have run since, so rebuild the expectation from the ring
+        // NOW shifted back by those 3 blocks.
+        const float *ring = h.unit()->engine->getCapData();
+        const int w = h.unit()->engine->getCapWritePos();
+        const int shift = 3 * FRAMELENGTH;
+        int mism = 0;
+        for (int i = 0; i < N - shift; ++i)      // the part not overwritten since
+            if (capData[i + shift] != ring[(w + i) & (N - 1)]) ++mism;
+        // The newest captured sample is the last input of the edge block.
+        bool tailOk = std::isfinite(capData[N - 1]) && capData[N - 1] != -9.0f;
+
+        h.set(kCapTrig, 0.0f); runBlocks(1);
+        h.set(kCapBuf, 1.0f); h.set(kCapTrig, 1.0f); runBlocks(1);      // too small
+        const bool refusedSmall = gCap.last.size() == 2 && gCap.last[0] == 0.0f && small[0] == -9.0f;
+        h.set(kCapTrig, 0.0f); runBlocks(1);
+        h.set(kCapBuf, 9.0f); h.set(kCapTrig, 1.0f); runBlocks(1);      // out of range
+        const bool refusedRange = gCap.last.size() == 2 && gCap.last[0] == 0.0f;
+
+        // ring-based peaks: feedback writes regenerated signal into the ring
+        h.set(kCapTrig, 0.0f); h.set(kFeedback, 0.9f); h.set(kMix, 1.0f);
+        gWave = Reply();
+        runBlocks(N / FRAMELENGTH + 2 * h.unit()->waveEvery);
+        float pmax = 0; for (int b = 0; b < kWaveBins; ++b) pmax = std::max(pmax, gWave.last[1 + b]);
+        h.dtor();
+
+        char d[256];
+        snprintf(d, sizeof d, "oldest-first copy, %d mismatches; once per edge %s; small buf %s; bad bufnum %s; "
+                 "ring peaks with feedback %.3f (input alone 0.250)",
+                 mism, once ? "ok" : "NO", refusedSmall ? "refused" : "WRITTEN",
+                 refusedRange ? "refused" : "NO", pmax);
+        report("capture", okReply && mism == 0 && tailOk && once && refusedSmall && refusedRange
+               && pmax > 0.26f, d);
     }
 
     printf("%s\n", gFails ? "FAILED" : ">>> Dirac: all wiring tests passed");

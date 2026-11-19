@@ -25,6 +25,7 @@ make verify-vendor UPSTREAM=../dirac
 | 2026-08    | v0.2.10          | Initial vendoring (engine + the 17-suite host harness). |
 | 2026-11-18 | v0.2.12 (`b6017bf`) | Engine: 0.2.11 in-tune grains (sub-sample read positions), sanitize() on every control, integer dials; 0.2.12 removes Color (one inlet fewer: wrapper enum, `Dirac.sc.in`, `Engine_Dirac.sc`, `params.lua`, stub test follow). Harness: upstream's 0.2.12 `test/host/main.cpp` 3-way-merged with this repo's `nb()` block-count conversion (new `pitch` / `nan` suites wrapped too; `colort` dropped). Builds gain `-fno-finite-math-only`, as upstream. References regenerated: `ident-v0.2.12.bin` from upstream's own harness (bit-identical to ours), `-fl64` from ours. Pi `portcheck`: PASS, max diff -99.3 dBFS. |
 | 2026-11-18 | v0.2.12 + `1cab15c` | `DIRAC_MAX_GRAINS` build option, made upstream for this port (default 16; the ER-301 build is unchanged and its `ident` render bit-identical). The norns UGen builds with 32 (`ugen/Makefile` `MAX_GRAINS`); host tests and references stay at the default 16. Measured on the Pi: 13.2% avg of scsynth's deadline at 32 grains with everything at maximum, no xruns. |
+| 2026-11-18 | v0.2.12 + `6f34a28` | Read-only `getCapData()` and a public `kCapBufSize`, made upstream for this port (no behaviour change; ER-301 `ident` bit-identical). The norns UGen uses them to save the ring (capture) and to draw waveform peaks from the ring itself, feedback included, and wraps against the engine's own ring size instead of a copied constant. |
 
 ---
 

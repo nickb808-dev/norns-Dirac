@@ -68,6 +68,10 @@ enum {
     // Sample mode: a server buffer number, or < 0 for live. Not an engine
     // inlet - the wrapper turns it into setSample() (see "sample mode" below).
     kBuf,
+    // Capture: a rising edge on kCapTrig copies the ring into server buffer
+    // kCapBuf (mono, >= kRingSize frames), oldest sample first, then replies
+    // /dirac_captured [ok, frames]. sclang writes the buffer to a file.
+    kCapTrig, kCapBuf,
     kNumInputs
 };
 
@@ -106,12 +110,12 @@ static inline bool isAudioRateInlet(int i) { return i == kIn || i == kFire; }
 // 15 Hz waveform: 129 floats a frame is trivial, and at 4 Hz the live input
 // visibly stepped.
 //
-// Waveform peaks are |input| per kWaveBinLen samples, indexed by ABSOLUTE ring
-// position, so the UI rotates them against capWrite. They are the input as
-// written, not the ring's contents: with Feedback up the ring also holds the
-// regenerated signal, which only an engine getter can show (planned upstream:
-// getCapData()). Live mode only; sample-mode peaks come from the file.
-static constexpr int kRingSize    = 131072;  // == Dirac::kCapBufSize (private); see above
+// Waveform peaks are |ring| per kWaveBinLen samples, read from the engine's
+// ring (getCapData()) right after it is written, so they show what the grains
+// actually read - the regenerated signal included when Feedback is up.
+// Indexed by ABSOLUTE ring position; the UI rotates them against capWrite.
+// Live mode only; sample-mode peaks come from the file.
+static constexpr int kRingSize    = dirac::Dirac::kCapBufSize;
 static constexpr int kWaveBins    = 128;     // one per screen column
 static constexpr int kWaveBinLen  = kRingSize / kWaveBins;   // 1024
 static constexpr int kVizHz       = 30;
@@ -143,6 +147,8 @@ struct Dirac : public Unit {
     od::Sample    sample;
     bool          attached;
     int           attachedFrames;
+
+    float         lastCapTrig;
 };
 
 static void Dirac_next(Dirac *unit, int inNumSamples);
@@ -204,6 +210,7 @@ void Dirac_Ctor(Dirac *unit)
     unit->sample = od::Sample();
     unit->attached = false;
     unit->attachedFrames = 0;
+    unit->lastCapTrig = 0.0f;
 
     // (3) above. A mismatch here is the single most likely cause of a render
     // that diverges wildly rather than subtly, so say so in words: a silent
@@ -359,25 +366,50 @@ void Dirac_next(Dirac *unit, int inNumSamples)
 
     d->process();
 
-    // Waveform peaks, in step with the ring the engine just wrote. Uses the
-    // private input copy (fanBuf[0]): OUT(0) may alias the input wire, and by
-    // now it holds output.
+    // Waveform peaks, from the ring the engine just wrote (so feedback shows).
     //
     // A bin's peak is committed when its LAST sample is written. Resetting it
     // on entry instead (the first version) showed a gap at the write head in
     // every frame - the ugentest `viz` case caught it at 64. Committing late
     // shows the previous pass of that bin for up to 21 ms, which is invisible.
     if (!frozen && !sampleMode) {
-        const float *in = unit->fanBuf[0];
+        const float *ring = d->getCapData();
         for (int s = 0; s < FRAMELENGTH; ++s) {
             const int idx = (capBefore + s) & (kRingSize - 1);
-            const float a = fabsf(in[s]);
+            const float a = fabsf(ring[idx]);
             if (a > unit->binPeak) unit->binPeak = a;
             if ((idx % kWaveBinLen) == kWaveBinLen - 1) {
                 unit->peaks[idx / kWaveBinLen] = unit->binPeak;
                 unit->binPeak = 0.0f;
             }
         }
+    }
+
+    // Capture, on a rising edge: copy the ring, oldest sample first, into the
+    // server buffer sclang allocated for it. 512 KB in one block: ~0.1 ms on
+    // a Pi 4, once per press. Frozen or not, it is the ring as it is now.
+    {
+        const float t = IN0(kCapTrig);
+        if (t > 0.0f && unit->lastCapTrig <= 0.0f) {
+            float reply[2] = {0.0f, 0.0f};
+            World *w = unit->mWorld;
+            const float fb = IN0(kCapBuf);
+            if (w && fb >= 0.0f && uint32(fb) < w->mNumSndBufs) {
+                SndBuf *buf = w->mSndBufs + uint32(fb);
+                LOCK_SNDBUF(buf);
+                if (buf->data && buf->channels == 1 && buf->frames >= kRingSize) {
+                    const float *ring = d->getCapData();
+                    const int start = d->getCapWritePos();     // the oldest sample
+                    const int first = kRingSize - start;
+                    memcpy(buf->data, ring + start, size_t(first) * sizeof(float));
+                    memcpy(buf->data + first, ring, size_t(start) * sizeof(float));
+                    reply[0] = 1.0f;
+                    reply[1] = float(kRingSize);
+                }
+            }
+            SendNodeReply(&unit->mParent->mNode, -1, "/dirac_captured", 2, reply);
+        }
+        unit->lastCapTrig = t;
     }
 
     if (--unit->vizCountdown <= 0) {

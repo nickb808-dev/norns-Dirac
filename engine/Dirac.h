@@ -202,6 +202,12 @@ public:
     bool  getDiffuseOn()                { return mDiffuseOpt.value() >= 2; }
     bool  getFreezeOn()                 { return mFreezeOpt.value()  >= 2; }  // snowflake
     int   getCapWritePos()        const { return mCapWrite; }  // baseline crawl; parks on Freeze
+    // The live capture ring itself, read-only (for ports that save or draw
+    // it: the norns port writes it to a file and draws its peaks, feedback
+    // included). kCapBufSize floats; the oldest sample is at getCapWritePos().
+    // Public so a reader can size and wrap against the real ring.
+    static constexpr int   kCapBufSize    = 131072;  // live capture ring ≈ 2.73 s (power of two)
+    const float *getCapData()     const { return mCapBuf.data(); }
     // Harness-facing accessors (v0.2.0): spawn read position + current pan
     // gains, so the host tests don't need to reach into private grain state.
     float getGrainSpawnPos(int i) const { return float(mGrains[i].idx0L) + mGrains[i].frac0L; }
@@ -212,7 +218,6 @@ private:
     /* ── Constants ─────────────────────────────────────────────────────── */
     static constexpr int   kSampleRate    = 48000;
     static constexpr int   kMaxHeads      = 4;       // multi-playhead cap (v0.2.0)
-    static constexpr int   kCapBufSize    = 131072;  // live capture ring ≈ 2.73 s (power of two)
     static constexpr int   kMaxGrainSamp  = 96000;   // grain length ceiling (2 s)
     static constexpr int   kEnvTableSize  = 1024;    // grain envelope table (read by phase)
     static constexpr float kDensFloor     = 0.25f;   // min density (overlap) so it never near-stops
