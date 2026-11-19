@@ -68,7 +68,7 @@ Engine_Dirac : CroneEngine {
 			    playhead = 0.0, speed = 0.0, rate = 3.0, grains = 12, grainlen = 0.05,
 			    posjtr = 0.0, revprob = 0.0, semishift = 0, voct = 0.0, psprd = 0.0,
 			    scale = 0, window = 0, texture = 0.5, tilt = 0.0, tiltspread = 0.0,
-			    heads = 1, headspread = 0.0, headtune = 0, snap = 0.0, color = 0.0,
+			    heads = 1, headspread = 0.0, headtune = 0, snap = 0.0,
 			    compress = 0.0, spread = 0.5, detune = 0.0, binaural = 0.0,
 			    mix = 1.0, feedback = 0.0, level = 0.7, fire = 0.0, hold = 0.0,
 			    playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;
@@ -90,7 +90,7 @@ Engine_Dirac : CroneEngine {
 				playhead, rate, posjtr, spread, detune, level, revprob, psprd,
 				texture, grains, fireAr, hold, semishift, grainlen, mix, feedback,
 				compress, binaural, scale, voct, speed, heads, headspread,
-				headtune, snap, color, tilt, tiltspread, window,
+				headtune, snap, tilt, tiltspread, window,
 				playheadsOpt, diffuseOpt, freezeOpt);
 
 			// METERS, and the reason they are worth the two UGens.
@@ -136,7 +136,7 @@ Engine_Dirac : CroneEngine {
 		[
 			\playhead, \speed, \rate, \grains, \grainlen, \posjtr, \revprob,
 			\semishift, \voct, \psprd, \scale, \window, \texture, \tilt,
-			\tiltspread, \heads, \headspread, \headtune, \snap, \color,
+			\tiltspread, \heads, \headspread, \headtune, \snap,
 			\compress, \spread, \detune, \binaural, \mix, \feedback, \level,
 			\fire, \hold
 		].do { |name|

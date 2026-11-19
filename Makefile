@@ -13,7 +13,11 @@ UPSTREAM     ?= ../dirac
 ENGINE       := engine/Dirac.cpp
 HOSTINC      := -Itest/host -Iengine
 NORNSINC     := -Inorns -Iengine
-CXXFLAGS     := -std=c++17 -O2 -ffast-math -Wall -Wno-unused-parameter
+# -fno-finite-math-only: -ffast-math implies -ffinite-math-only, which lets the
+# compiler assume NaN/Inf never occur and DELETE the engine's sanitize() and
+# isfinite() guards (found upstream in 0.2.11). Upstream builds this way; so must
+# every build here, or the NaN guards exist only in the source.
+CXXFLAGS     := -std=c++17 -O2 -ffast-math -fno-finite-math-only -Wall -Wno-unused-parameter
 
 .PHONY: all check hosttest shimtest verify-vendor reference ugentest luacheck sccheck paramcheck portcheck clean help
 all: help
@@ -50,13 +54,22 @@ ugentest:
 # ── the ported ER-301 harness ────────────────────────────────────────────────
 # Identical source to upstream's test/host. If this passes here and there, the
 # vendored engine behaves like the canonical one.
-HOSTSUITES := seam fieldpos headsnap snapt colort difft freezet sfbt \
+HOSTSUITES := pitch nan seam fieldpos headsnap snapt difft freezet sfbt \
               headscale fbdc windowt tiltt winbankt
+
+# Each suite exits non-zero on failure, and so does this. (It used to print
+# `| tail -1` and carry on, so a FAIL scrolled past and make still exited 0.)
+# $(1) = the harness binary.
+define run_suites
+	@for s in $(HOSTSUITES); do \
+	  if $(1) $$s > build/suite-$$s.txt 2>&1; then printf '  ok   %s\n' $$s; \
+	  else cat build/suite-$$s.txt; printf '  FAIL %s\n' $$s; exit 1; fi; done
+endef
 
 hosttest:
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(HOSTINC) $(ENGINE) test/host/main.cpp -o build/t
-	@for s in $(HOSTSUITES); do printf '%-12s ' $$s; ./build/t $$s | tail -1; done
+	$(call run_suites,./build/t)
 	@./build/t asan >/dev/null && echo "asan        ok"
 	@echo ">>> hosttest: all suites reported above"
 
@@ -102,8 +115,9 @@ verify-vendor:
 # therefore meaningless, and comparing against the wrong one would look like a
 # catastrophic port bug.
 #
-#   ident-v0.2.10.bin       FRAMELENGTH=128 — parity with the ER-301
-#   ident-v0.2.10-fl64.bin  FRAMELENGTH=64  — THE PHASE 1 ACCEPTANCE TARGET,
+#   ident-v0.2.12.bin       FRAMELENGTH=128 — parity with the ER-301; rendered
+#                                             by UPSTREAM's own harness
+#   ident-v0.2.12-fl64.bin  FRAMELENGTH=64  — THE PHASE 1 ACCEPTANCE TARGET,
 #                                             because norns runs scsynth at 64
 #                                             (probed 2026-08-27: launched with
 #                                             no -z; scsynth's default is 64)
@@ -111,13 +125,28 @@ verify-vendor:
 # When the UGen exists, render the same scenarios through it in NRT on the Pi
 # at 64 and diff against the fl64 file. "Sounds right" is not an exit
 # criterion; this is.
-REFERENCE   := test/reference/ident-v0.2.10.bin
-REFERENCE64 := test/reference/ident-v0.2.10-fl64.bin
+REFERENCE   := test/reference/ident-v0.2.12.bin
+REFERENCE64 := test/reference/ident-v0.2.12-fl64.bin
+
+# Two tiers. Bit-identical is the strong result. A different compiler (an Xcode
+# update did exactly this: Apple clang 21 drifted from the August references by
+# at most -81.6 dBFS) is graded by refdiff.py, which passes float-dialect
+# differences and fails anything larger. Only a refdiff FAIL means the engine
+# behaves differently.
+# $(1) = render, $(2) = reference, $(3) = label
+define check_ref
+	@if cmp -s $(1) $(2); then \
+	  echo "$(3): OK — bit-identical to $(2)"; \
+	else \
+	  echo "$(3): not bit-identical to $(2); grading with refdiff:"; \
+	  python3 -I tools/refdiff.py $(2) $(1) || { echo "$(3): FAIL"; exit 1; }; \
+	fi
+endef
 
 reference: hosttest
 	@mkdir -p test/reference
-	./build/t ident /tmp/ident-now.bin
-	@if cmp -s /tmp/ident-now.bin $(REFERENCE); then 	  echo "reference: OK — this build renders the canonical output bit-for-bit"; 	else 	  echo "reference: FAIL — output drifted from $(REFERENCE)."; 	  echo "           Either the engine was edited here (it must not be —"; 	  echo "           see ENGINE-PROVENANCE.md) or the toolchain changed."; 	  exit 1; 	fi
+	./build/t ident build/ident-now.bin
+	$(call check_ref,build/ident-now.bin,$(REFERENCE),reference)
 
 # ── the same harness at the block size norns actually runs ───────────────────
 # Guards two things at once: that the engine behaves at 64 (it does — every
@@ -128,19 +157,14 @@ reference: hosttest
 hosttest64:
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(HOSTINC) -DFRAMELENGTH=64 $(ENGINE) test/host/main.cpp -o build/t64
-	@for s in $(HOSTSUITES); do printf '%-12s ' $$s; ./build/t64 $$s | tail -1; done
+	$(call run_suites,./build/t64)
 	@./build/t64 asan >/dev/null && echo "asan        ok"
 	@echo ">>> hosttest64: all suites reported above (FRAMELENGTH=64)"
 
 reference64: hosttest64
 	@mkdir -p test/reference
-	./build/t64 ident /tmp/ident64-now.bin
-	@if cmp -s /tmp/ident64-now.bin $(REFERENCE64); then \
-	  echo "reference64: OK — 64-sample build matches the norns acceptance target"; \
-	else \
-	  echo "reference64: FAIL — output drifted from $(REFERENCE64)."; \
-	  exit 1; \
-	fi
+	./build/t64 ident build/ident64-now.bin
+	$(call check_ref,build/ident64-now.bin,$(REFERENCE64),reference64)
 
 check: verify-vendor shimtest hosttest reference hosttest64 reference64 ugentest luacheck sccheck paramcheck
 
@@ -160,7 +184,7 @@ portcheck: shimtest
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(HOSTINC) -DFRAMELENGTH=64 $(ENGINE) test/host/main.cpp -o build/t64
 	@echo "--- suites at FRAMELENGTH=64 (the block size norns runs) -------------"
-	@for s in $(HOSTSUITES); do printf '%-12s ' $$s; ./build/t64 $$s | tail -1; done
+	$(call run_suites,./build/t64)
 	@./build/t64 asan >/dev/null && echo "asan         ok"
 	@echo
 	@echo "--- the cross-architecture diff --------------------------------------"

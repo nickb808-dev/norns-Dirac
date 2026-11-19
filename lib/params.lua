@@ -61,7 +61,6 @@ return {
 
   -- ── character ─────────────────────────────────────────────────────────────
   { id = "snap",       name = "snap",        min = 0.0,   max = 1.0,  default = 0.0  },
-  { id = "color",      name = "colour",      min = 0.0,   max = 1.0,  default = 0.0  },
   { id = "compress",   name = "compress",    min = 0.0,   max = 1.0,  default = 0.0  },
 
   -- ── stereo ────────────────────────────────────────────────────────────────

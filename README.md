@@ -42,7 +42,7 @@ runs four gates:
 | `hosttest` | all 17 ported ER-301 suites pass here |
 | `reference` | this build renders `ident` **bit-for-bit** identical to the canonical engine |
 
-That last one is the important one. `test/reference/ident-v0.2.10.bin` is the
+That last one is the important one. `test/reference/ident-v0.2.12.bin` is the
 canonical engine's output for a set of deterministic scenarios — fixed RNG
 seed, fixed control values, live and sample mode. It is **the acceptance test
 for Phase 1**: when the UGen exists, render the same scenarios through it in

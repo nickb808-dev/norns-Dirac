@@ -41,10 +41,15 @@ SC_INC := -I$(SC_DIR)/plugin_interface -I$(SC_DIR)/common -I$(SC_DIR)
 # results slightly, which is expected and quantified: refdiff.py's tolerances
 # come from measuring exactly this kind of variation.
 #
+# -fno-finite-math-only is NOT optional. -ffast-math alone lets the compiler
+# assume NaN/Inf never happen and delete the engine's sanitize()/isfinite()
+# guards (found upstream in 0.2.11). On the audio thread that turns one bad
+# control value into a NaN that sticks in the feedback ring.
+#
 # No -march/-mtune: the distro compiler already targets this machine, and
 # guessing at armv7 flags is a good way to produce a plugin that will not load
 # on a Pi 3 later.
-CXXFLAGS := -std=c++17 -O2 -ffast-math -fPIC -Wall -Wno-unused-parameter \
+CXXFLAGS := -std=c++17 -O2 -ffast-math -fno-finite-math-only -fPIC -Wall -Wno-unused-parameter \
             -DFRAMELENGTH=$(FRAMELENGTH) -DNDEBUG \
             -I../norns -I../engine $(SC_INC)
 LDFLAGS  := -shared

@@ -197,7 +197,7 @@ In order. Each has a pass condition; do not skip forward on a fail.
 
 **Phase 1 acceptance, once it makes sound**
 
-- [ ] `make portcheck` on the Pi: 17 suites at 64, `refdiff` PASS against `ident-v0.2.10-fl64.bin`.
+- [ ] `make portcheck` on the Pi: 14 suites at 64, `refdiff` PASS against `ident-v0.2.12-fl64.bin`.
 - [ ] NRT render of the `ident` scenarios through `Dirac.so` in scsynth on the Pi, `refdiff` PASS. (Tool to be written.)
 
 ---

@@ -42,14 +42,14 @@ Dirac : MultiOutUGen {
 		fire = 0.0, hold = 0.0, semiShift = 0.0, grainLen = 0.05, mix = 1.0,
 		feedback = 0.0, compress = 0.0, binaural = 0.0, scale = 0.0, voct = 0.0,
 		speed = 0.0, heads = 1.0, headSpread = 0.0, headTune = 0.0, snap = 0.0,
-		color = 0.0, tilt = 0.0, tiltSpread = 0.0, window = 0.0,
+		tilt = 0.0, tiltSpread = 0.0, window = 0.0,
 		playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;
 
 		^this.multiNew('audio', in,
 			playhead, rate, posJtr, spread, detune, level, revProb, psprd,
 			texture, grains, fire, hold, semiShift, grainLen, mix, feedback,
 			compress, binaural, scale, voct, speed, heads, headSpread,
-			headTune, snap, color, tilt, tiltSpread, window,
+			headTune, snap, tilt, tiltSpread, window,
 			playheadsOpt, diffuseOpt, freezeOpt);
 	}
 

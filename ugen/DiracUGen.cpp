@@ -59,7 +59,7 @@ enum {
     kLevel,    kRevProb,  kPsprd,    kTexture,  kGrains,  kFire,
     kHold,     kSemiShift, kGrainLen, kMix,     kFeedback, kCompress,
     kBinaural, kScale,    kVoct,     kSpeed,    kHeads,   kHeadSpread,
-    kHeadTune, kSnap,     kColor,    kTilt,     kTiltSpread, kWindow,
+    kHeadTune, kSnap,     kTilt,     kTiltSpread, kWindow,
     kNumInlets,
     // Menu options. Ints, 1-based, matching od::OptionControl on the device —
     // the engine compares against literal 1/2/3, so 0 is not a valid value.
@@ -127,7 +127,6 @@ static inline od::Port *portFor(dirac::Dirac *d, int i)
         case kHeadSpread: return &d->mHeadSpreadIn;
         case kHeadTune:   return &d->mHeadTuneIn;
         case kSnap:       return &d->mSnapIn;
-        case kColor:      return &d->mColorIn;
         case kTilt:       return &d->mTiltIn;
         case kTiltSpread: return &d->mTiltSprdIn;
         case kWindow:     return &d->mWindowIn;

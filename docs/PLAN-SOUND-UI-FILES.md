@@ -216,10 +216,10 @@ without extra code.
 1. **Housekeeping.** Commit the aliasing fix. Make `tools/check-ugen-names.sh`
    work without GNU `grep -P`, so `make check` runs on macOS. Correct
    `PAPPUS-VS-DIRAC.md` §4 and the README status. *(Done 2026-11-18.)*
-2. **A0** engine sync to 0.2.12 (removes Color, fixes pitch).
+2. **A0** engine sync to 0.2.12 (removes Color, fixes pitch). *(Done 2026-11-18.)*
 3. **A1 quick wins**, then a listening check: does it play better while still
    sounding like itself?
-4. **A3** `portcheck` on the Pi (one command).
+4. **A3** `portcheck` on the Pi (one command). *(Done 2026-11-18: PASS, -99.3 dBFS.)*
 5. **B:** pages and controls first with a placeholder field, then the viz data
    path, then the waveform.
 6. **C1** load, then **C2** capture via the upstream getter.

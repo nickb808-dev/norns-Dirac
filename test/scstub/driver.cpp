@@ -131,7 +131,7 @@ static const CtlVal kCtls[] = {
     {kCompress,0.53f,"Compress"}, {kBinaural,0.39f,"Binaural"},{kScale,2.0f,"Scale"},
     {kVoct,0.08f,"V/Oct"},        {kSpeed,0.9f,"Speed"},     {kHeads,3.0f,"Heads"},
     {kHeadSpread,0.47f,"HeadSpread"},{kHeadTune,5.0f,"HeadTune"},{kSnap,0.61f,"Snap"},
-    {kColor,0.44f,"Color"},       {kTilt,0.66f,"Tilt"},      {kTiltSpread,0.28f,"TiltSpread"},
+    {kTilt,0.66f,"Tilt"},      {kTiltSpread,0.28f,"TiltSpread"},
     {kWindow,3.0f,"Window"},
 };
 static const int kNumCtls = sizeof(kCtls) / sizeof(kCtls[0]);
@@ -174,7 +174,6 @@ static const float kAltVal[] = {
     0.95f,  // HeadSpread
   -11.0f,   // HeadTune
     0.05f,  // Snap
-    0.95f,  // Color
     0.10f,  // Tilt
     0.90f,  // TiltSpread
     6.0f,   // Window
@@ -223,10 +222,9 @@ static void setEnginePort(dirac::Dirac *d, int idx, float *buf)
         case 23: p = &d->mHeadSpreadIn;break;
         case 24: p = &d->mHeadTuneIn;  break;
         case 25: p = &d->mSnapIn;      break;
-        case 26: p = &d->mColorIn;     break;
-        case 27: p = &d->mTiltIn;      break;
-        case 28: p = &d->mTiltSprdIn;  break;
-        case 29: p = &d->mWindowIn;    break;
+        case 26: p = &d->mTiltIn;      break;
+        case 27: p = &d->mTiltSprdIn;  break;
+        case 28: p = &d->mWindowIn;    break;
         default: return;
     }
     p->point(buf);
