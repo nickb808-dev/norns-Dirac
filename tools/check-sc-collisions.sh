@@ -56,7 +56,7 @@ done
 # suspect for a full day before the real error was read. Cheap to just forbid.
 for f in $scanned $(find . -name '*.sc.in' -not -path './.git/*'); do
     [ -f "$f" ] || continue
-    n=$(grep -cP '[^\x00-\x7F]' "$f" 2>/dev/null); n=${n:-0}
+    n=$(perl -ne '$n++ if /[^\x00-\x7F]/; END { print $n+0 }' "$f" 2>/dev/null); n=${n:-0}
     if [ "$n" -ne 0 ] 2>/dev/null; then
         echo "check-sc-collisions: FAIL  $f has $n lines with non-ASCII bytes"
         fail=1

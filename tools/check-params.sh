@@ -15,23 +15,28 @@
 # Ranges are NOT checked here. They are checked by being written down once, in
 # lib/params.lua, and copied from the ER-301 unit rather than remembered.
 set -u
+
+# grep -P is GNU-only: macOS grep has no -P, so these checks failed there before
+# they reached the code under test. perl reads the same regex syntax (\K,
+# lookarounds) and ships on both macOS and the norns.
+pgrep_o() { PAT="$1" perl -ne 'while (/$ENV{PAT}/g) { print "$&\n" }' "${@:2}"; }
 cd "$(dirname "$0")/.." || exit 2
 fail=0
 
 # The three menu OPTIONS live in dirac.lua rather than lib/params.lua, because
 # they are add_option not add_control. They still need commands, so they are
 # part of the same comparison.
-lua_ids=$( { grep -oP '^\s*\{\s*id\s*=\s*"\K[a-zA-Z]+' lib/params.lua
-             grep -oP '^\s*\{\s*id\s*=\s*"\K[a-zA-Z]+Opt' dirac.lua; } | sort -u)
+lua_ids=$( { pgrep_o '^\s*\{\s*id\s*=\s*"\K[a-zA-Z]+' lib/params.lua
+             pgrep_o '^\s*\{\s*id\s*=\s*"\K[a-zA-Z]+Opt' dirac.lua; } | sort -u)
 
 # addCommand names come from the two symbol lists, not from a literal string,
 # so extract the symbols inside the two .do { } blocks.
 sc_cmds=$(sed -n '/One command per parameter/,/^	}/p' lib/Engine_Dirac.sc \
-          | grep -oP '\\\K[a-zA-Z]+' | sort -u)
+          | pgrep_o '\\\K[a-zA-Z]+' | sort -u)
 
 # SynthDef arguments: everything between `arg` and the closing `;`.
 sc_args=$(sed -n '/synth = {/,/playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;/p' lib/Engine_Dirac.sc \
-          | grep -oP '(?<![a-zA-Z\\])\b[a-zA-Z][a-zA-Z0-9]*(?=\s*=)' | sort -u)
+          | pgrep_o '(?<![a-zA-Z\\])\b[a-zA-Z][a-zA-Z0-9]*(?=\s*=)' | sort -u)
 
 emptycheck() {
     if [ -z "$2" ]; then

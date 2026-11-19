@@ -14,12 +14,17 @@
 # not installed", which reads like a server problem rather than a naming one.
 # That one actually happened.
 set -u
+
+# grep -P is GNU-only: macOS grep has no -P, so these checks failed there before
+# they reached the code under test. perl reads the same regex syntax (\K,
+# lookarounds) and ships on both macOS and the norns.
+pgrep_o() { PAT="$1" perl -ne 'while (/$ENV{PAT}/g) { print "$&\n" }' "${@:2}"; }
 cd "$(dirname "$0")/.." || exit 2
 fail=0
 
 # ── 1. the registered name vs the SC class name ──────────────────────────────
-reg=$(grep -oP 'DefineDtorUnit\(\K[A-Za-z_]+' ugen/DiracUGen.cpp | head -1)
-cls=$(grep -oP '^\s*\K[A-Za-z_]+(?=\s*:\s*MultiOutUGen)' ugen/Dirac.sc.in | head -1)
+reg=$(pgrep_o 'DefineDtorUnit\(\K[A-Za-z_]+' ugen/DiracUGen.cpp | head -1)
+cls=$(pgrep_o '^\s*\K[A-Za-z_]+(?=\s*:\s*MultiOutUGen)' ugen/Dirac.sc.in | head -1)
 if [ "$reg" = "$cls" ]; then
     echo "check-ugen-names: OK    unit registered as '$reg', SC class is '$cls'"
 else
@@ -33,9 +38,9 @@ fi
 # wrapper's is the switch in portFor(). Compare the MEMBER names, which is the
 # only thing both files spell identically.
 engine_order=$(sed -n '/^Dirac::Dirac()/,/^}/p' engine/Dirac.cpp \
-               | grep -oP 'addInput\(\K[A-Za-z_]+')
+               | pgrep_o 'addInput\(\K[A-Za-z_]+')
 wrapper_order=$(sed -n '/od::Port \*portFor/,/^}/p' ugen/DiracUGen.cpp \
-                | grep -oP 'return &d->\K[A-Za-z_]+')
+                | pgrep_o 'return &d->\K[A-Za-z_]+')
 
 # An empty list on either side means the extraction broke, not that the orders
 # agree. Without this the check passes vacuously and reports "0 inlets", which
@@ -62,7 +67,7 @@ fi
 n_wrap=$(sed -n '/od::Port \*portFor/,/^}/p' ugen/DiracUGen.cpp | grep -c 'return &d->')
 n_opts=$(grep -c 'Opt\.set(' ugen/DiracUGen.cpp)
 n_sc=$(sed -n '/\*ar {/,/multiNew/p' ugen/Dirac.sc.in \
-       | grep -oP '\b[a-zA-Z][a-zA-Z0-9]*\s*=' | wc -l)
+       | pgrep_o '\b[a-zA-Z][a-zA-Z0-9]*\s*=' | wc -l)
 want=$((n_wrap + n_opts))
 if [ "$n_sc" -eq "$want" ]; then
     echo "check-ugen-names: OK    $n_sc SC arguments = $n_wrap inlets + $n_opts options"
