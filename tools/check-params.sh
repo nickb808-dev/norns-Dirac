@@ -100,4 +100,11 @@ else
     echo "check-params: OK    density and grains both top out at the $pool-grain pool"
 fi
 
+# ── 5. every param reachable from a page ─────────────────────────────────────
+if command -v lua >/dev/null 2>&1; then
+    lua tools/check-pages.lua || fail=1
+else
+    echo "check-params: SKIP  pages check (no lua interpreter)"
+fi
+
 exit $fail

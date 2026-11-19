@@ -111,5 +111,6 @@ return {
   -- head tune in the engine (mMultiHeadOpt), so the UI dims them while off.
   { id = "playheadsOpt", name = "multi",     kind = "option", options = { "off", "on" },        base = 1, default = 1 },
   { id = "diffuseOpt",   name = "diffuse",   kind = "option", options = { "off", "on" },        base = 1, default = 1 },
-  { id = "freezeOpt",    name = "capture",   kind = "option", options = { "run", "freeze" },    base = 1, default = 1 },
+  -- off/on so it draws as a toggle like every other on/off control
+  { id = "freezeOpt",    name = "freeze",    kind = "option", options = { "off", "on" },        base = 1, default = 1 },
 }

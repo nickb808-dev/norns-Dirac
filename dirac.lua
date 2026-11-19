@@ -66,15 +66,17 @@ local OPTS = {}   -- id -> option labels, for on/off detection
 -- Two params on E2/E3, two more with K1 held. Everything else (and all of it,
 -- for MIDI mapping and PSETs) is in the norns PARAMS menu.
 local PAGES = {
-  { name = "grain", main = { "rate", "grainlen" },     alt = { "grains", "window" } },
-  { name = "scan",  main = { "playhead", "speed" },    alt = { "posjtr", "revprob" } },
-  { name = "pitch", main = { "semishift", "psprd" },   alt = { "scale", "voct" } },
-  { name = "tone",  main = { "texture", "tilt" },      alt = { "tiltspread", "snap" } },
-  { name = "space", main = { "spread", "binaural" },   alt = { "detune", "diffuseOpt" } },
-  -- the enable switch and what it governs first, refinements under K1
-  { name = "heads", main = { "playheadsOpt", "heads" }, alt = { "headspread", "headtune" } },
-  { name = "regen", main = { "feedback", "compress" }, alt = { "freezeOpt", "hold" } },
-  { name = "out",   main = { "mix", "level" },         alt = { "ingain", "insrc" } },
+  -- Each page: the control that defines it (or its enable switch) first, the
+  -- one it is most often paired with second, refinements under K1. Controls
+  -- that are inert in the current state dim (see ACTIVE_IF).
+  { name = "grain", main = { "rate", "grainlen" },        alt = { "grains", "revprob" } },
+  { name = "shape", main = { "window", "texture" },       alt = { "tilt", "tiltspread" } },
+  { name = "scan",  main = { "playhead", "posjtr" },      alt = { "speed", "snap" } },
+  { name = "pitch", main = { "semishift", "psprd" },      alt = { "scale", "voct" } },
+  { name = "heads", main = { "playheadsOpt", "heads" },   alt = { "headspread", "headtune" } },
+  { name = "space", main = { "spread", "binaural" },      alt = { "detune", "diffuseOpt" } },
+  { name = "regen", main = { "feedback", "compress" },    alt = { "freezeOpt", "hold" } },
+  { name = "out",   main = { "mix", "level" },            alt = { "insrc", "ingain" } },
 }
 local page = 1
 
@@ -106,6 +108,9 @@ local ACTIVE_IF = {
   -- Speed scans a loaded sample (speed != 0 && sampleCount > 1); live, it is
   -- inert
   speed = function() return viz.sample end,
+  -- Mix is the live wet/dry (`if (liveMode && mix < ...)`); a loaded sample
+  -- has no dry signal to mix
+  mix = function() return not viz.sample end,
   -- Scale quantises the pitch offset = scatter + head x head tune; with
   -- neither there is nothing to snap
   scale = function()
