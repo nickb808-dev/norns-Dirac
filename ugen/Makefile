@@ -197,6 +197,9 @@ install: $(PLUGIN).so
 	  echo "install: FAILED, but the norns will still boot."; \
 	  exit 1; \
 	fi
+	@# Mark this as a source build, so dirac.lua's first-run installer leaves it
+	@# alone instead of replacing it with the prebuilt plugin.
+	@echo "source build $$(date -u +%Y-%m-%dT%H:%MZ) on $$(uname -m)" > $(EXTDIR)/BUILD
 	@echo
 	@echo
 	@echo "Restart the audio engine for scsynth to pick it up (SYSTEM > RESET on"

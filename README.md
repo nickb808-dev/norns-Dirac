@@ -1,19 +1,88 @@
-# norns-dirac
+# dirac
 
-**Dirac** — the granular processor from the ER-301 — on monome norns.
+**Dirac**, the granular processor from the ER-301, on monome norns.
 
-Target: **norns shield on a Raspberry Pi 4B**. Works on official norns too.
+**v0.9.0 beta.** For norns and norns shield (32-bit norns images, which is all
+of them today). Developed on a norns shield with a Raspberry Pi 4B.
 
-> **Status (2026-11-18): makes grains on the device.** The UGen, the norns
-> engine and a basic list-UI script all run on a norns shield (Pi 4B), with
-> live input. The engine is still the v0.2.10 vendored copy; upstream is at
-> 0.2.12. Next: the work in `docs/PLAN-SOUND-UI-FILES.md`, which covers the
-> engine sync, finer controls, a paged waveform UI, and file load and capture.
-> The history of getting to sound is in `docs/PAPPUS-VS-DIRAC.md` §4.
->
-> **norns shield setup:** set `RemoveIPC=no` in `/etc/systemd/logind.conf`
-> and reboot. Without it, every SSH logout deletes JACK's shared memory, and
-> audio connections break in ways that look like script bugs.
+---
+
+## Beta testers: start here
+
+### Install
+
+1. In maiden, run:
+
+   ```
+   ;install https://github.com/nickb808-dev/dirac
+   ```
+
+2. Load **dirac** from SELECT. The first time, it installs its SuperCollider
+   plugin and shows **"engine installed. SYSTEM > RESTART"**.
+3. Do **SYSTEM > RESTART**, then load **dirac** again. You'll see the title
+   screen, then the grain field.
+
+An update that changes the engine shows the same screen once, and needs one
+more restart. Updates that don't change the engine load straight away.
+
+### Playing it
+
+Plug a source into the norns input. The top of the screen is the **field**:
+the live buffer as a waveform, with "now" at the right edge, and each grain as
+a bright bar where it is reading, raised or lowered by its pitch.
+
+| control | does |
+|---|---|
+| E1 | page: grain, shape, scan, pitch, heads, space, regen, out, file |
+| E2 / E3 | the two parameters on the page |
+| K1 held | the page's second pair of parameters (hold for about 1/4 s) |
+| K2 tap | hold the cloud on/off |
+| K2 held + E2/E3 | fine adjust |
+| K3 | fire: spawn grains now (at density 0, the only way they spawn) |
+| K1 held + K3 | save the buffer (2.73 s) to `~/dust/audio/dirac/` |
+| K1 held + K2 | field shows stereo position instead of buffer position |
+
+Dimmed parameters do nothing in the current state (for example, speed in live
+mode, or head spread with multi off). Every parameter is also in **PARAMS**,
+for MIDI mapping and PSETs.
+
+**Files:** on the **file** page, turn E3 on *sample* to open the browser and
+pick a file from `~/dust/audio`. Files that aren't 48 kHz are converted once
+(into `~/dust/audio/dirac/.cache/`). *source* switches between live input and
+the sample. Saved buffer captures load straight back in as samples.
+
+### Known issues
+
+- One brief click when the script loads, while the engine allocates its
+  memory.
+- Converting a long non-48 kHz file takes a few seconds the first time.
+- In sample mode the waveform shows the file, not the regeneration buffer
+  that feedback writes into.
+
+### Reporting a problem
+
+Please include:
+
+- what you did, what you expected, and what happened;
+- your norns (official or shield, and which Pi) and its norns version;
+- if anything errored, maiden's output after loading dirac.
+
+### If you SSH into a norns shield
+
+Set `RemoveIPC=no` in `/etc/systemd/logind.conf` and reboot. Without it,
+every SSH logout deletes JACK's shared memory, and audio connections break in
+ways that look like script bugs. (Only matters if you log in over SSH.)
+
+### Building the engine yourself
+
+Only needed on a 64-bit norns image, or to work on the code: on the norns,
+
+```
+cd ~/dust/code/dirac/ugen && make install
+```
+
+then SYSTEM > RESTART. `make install` marks the engine as a source build, so
+the script won't replace it with the prebuilt one.
 
 ---
 

@@ -1,6 +1,11 @@
--- dirac
+-- dirac v0.9.0 beta
 -- granular processor
 -- from the ER-301
+-- by nickb808
+--
+-- first run installs the
+-- engine: then SYSTEM >
+-- RESTART and load again
 --
 -- E1 page
 -- E2 / E3 the page's pair
@@ -27,6 +32,59 @@ local fileselect = require "fileselect"
 -- anything (it is `dirac` on the device; the repo is `norns-dirac`).
 local SPEC = include("lib/params")
 local splash = include("lib/splash")
+
+local VERSION = "0.9.0-beta.1"
+
+-- ── first run: install the engine's SuperCollider plugin ─────────────────────
+-- Testers install with ;install and never compile. The repo carries a prebuilt
+-- Dirac.so (ugen/prebuilt/, stamped with a source hash in BUILD); this runs as
+-- the script file is read - BEFORE norns loads the engine - and copies it into
+-- SuperCollider's Extensions folder whenever the BUILD there differs. scsynth
+-- only reads plugins at boot, so a fresh install then needs SYSTEM > RESTART,
+-- and the script says so instead of starting.
+--
+-- Files are replaced by rename, never overwritten in place: scsynth has the
+-- old Dirac.so mapped, and rewriting a mapped library under it can crash it.
+-- A checkout with no ugen/prebuilt/ (building from source) is left alone.
+local EXT = "/home/we/.local/share/SuperCollider/Extensions/Dirac/"
+local install_state = nil      -- nil: ready. "installed" | "unsupported" | "failed"
+
+local function slurp(path)
+  local f = io.open(path, "r")
+  if not f then return nil end
+  local s = f:read("a"); f:close()
+  return s
+end
+
+do
+  local here = norns.state.path
+  local want = slurp(here .. "ugen/prebuilt/BUILD")
+  local have = slurp(EXT .. "BUILD")
+  local installed = util.file_exists(EXT .. "Dirac.so")
+  -- `make install` (ugen/Makefile) stamps "source build": someone building
+  -- their own engine keeps it.
+  local source_build = have ~= nil and have:match("^source build") ~= nil
+  if want and not (installed and source_build) and (want ~= have or not installed) then
+    local arch = (util.os_capture("uname -m") or ""):gsub("%s+", "")
+    if arch ~= "armv7l" then
+      install_state = "unsupported"
+      print("dirac: prebuilt engine is for armv7l, this norns is " .. arch .. " - build from source (README)")
+    else
+      local q = function(x) return "'" .. x:gsub("'", "'\\''") .. "'" end
+      local cmd = table.concat({
+        "mkdir -p " .. q(EXT),
+        "cp " .. q(here .. "ugen/prebuilt/Dirac.so") .. " " .. q(EXT .. "Dirac.so.new"),
+        "mv -f " .. q(EXT .. "Dirac.so.new") .. " " .. q(EXT .. "Dirac.so"),
+        "cp " .. q(here .. "ugen/Dirac.sc.in") .. " " .. q(EXT .. "Dirac.sc.new"),
+        "mv -f " .. q(EXT .. "Dirac.sc.new") .. " " .. q(EXT .. "Dirac.sc"),
+        "cp " .. q(here .. "ugen/prebuilt/BUILD") .. " " .. q(EXT .. "BUILD"),
+      }, " && ")
+      local ok = os.execute(cmd)
+      install_state = ok and "installed" or "failed"
+      print("dirac: engine plugin " .. (ok and "installed - SYSTEM > RESTART to finish" or "install FAILED: " .. cmd))
+    end
+  end
+end
 
 -- ── engine calls that cannot brick init() ────────────────────────────────────
 -- Calling engine.<id>(x) directly kills init() if the engine is not loaded, and
@@ -202,6 +260,12 @@ local SCRIPT_ACTION = {
 
 -- ── init ─────────────────────────────────────────────────────────────────────
 function init()
+  -- Engine just installed (or cannot be): say so, and do nothing else. The
+  -- engine is not running in this session, so nothing below would work.
+  if install_state then
+    clock.run(function() while true do clock.sleep(0.5); redraw() end end)
+    return
+  end
   -- the title card covers the engine load; any key or encoder skips it
   splash.start()
   for _, p in ipairs(SPEC) do
@@ -350,6 +414,7 @@ local function adjust(id, d)
 end
 
 function enc(n, d)
+  if install_state then return end
   if splash.active() then splash.skip(); return end
   if n == 1 then
     page = util.clamp(page + d, 1, #PAGES)
@@ -360,6 +425,7 @@ function enc(n, d)
 end
 
 function key(n, z)
+  if install_state then return end
   -- a press skips the title; its release must not act either
   if splash.active() then
     if z == 1 then splash.skip(); swallow_release = n end
@@ -594,7 +660,22 @@ local function draw_param(x, id)
   end
 end
 
+local INSTALL_MSG = {
+  installed   = { "dirac " .. VERSION, "engine installed.", "SYSTEM > RESTART,", "then load dirac again." },
+  unsupported = { "dirac " .. VERSION, "this norns is not armv7l:", "build the engine", "from source (README)." },
+  failed      = { "dirac " .. VERSION, "engine install failed.", "see maiden's output", "for the reason." },
+}
+
 function redraw()
+  if install_state then
+    screen.clear(); screen.font_face(1); screen.font_size(8)
+    for i, line in ipairs(INSTALL_MSG[install_state]) do
+      screen.level(i == 1 and 15 or (i == 3 and 15 or 8))
+      screen.move(64, 10 + i * 11); screen.text_center(line)
+    end
+    screen.update()
+    return
+  end
   if browsing then return end              -- the file browser owns the screen
   if splash.active() then splash.draw(); return end
   screen.clear()
@@ -625,7 +706,9 @@ function redraw()
   draw_param(66, pair[2])
 
   if not engine_ok then
-    screen.level(15); screen.move(64, 24); screen.text_center("NO ENGINE")
+    -- usually: installed but not restarted yet, or the class library failed
+    screen.level(15); screen.move(64, 20); screen.text_center("NO ENGINE")
+    screen.level(8); screen.move(64, 30); screen.text_center("try SYSTEM > RESTART")
   elseif note_frames > 0 and note then
     screen.level(10); screen.move(64, 30); screen.text_center(note)
   end

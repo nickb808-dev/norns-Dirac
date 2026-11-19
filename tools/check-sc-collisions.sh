@@ -23,12 +23,13 @@ cd "$(dirname "$0")/.." || exit 2
 fail=0
 
 # Everything sclang would compile out of this repo.
-# test/minimal/ is a deliberately separate control experiment - a stock-shaped
+# (test/minimal/, the ThruTest/ToneTest control experiments, was removed for
+# packaging: norns would list its .lua files and compile its engines.) A stock-shaped
 # engine used to establish that the DEVICE can make sound at all, independent
 # of this port. It is copied to the norns by hand, never alongside the script,
 # so it cannot collide with anything.
 scanned=$(find . -name '*.sc' -not -path './build/*' -not -path './.git/*' \
-          -not -path './test/minimal/*' | sort)
+          | sort)
 
 # The allowed set: norns engine classes in lib/.
 allowed=$(find ./lib -name 'Engine_*.sc' 2>/dev/null | sort)

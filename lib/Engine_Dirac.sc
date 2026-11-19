@@ -58,6 +58,17 @@ Engine_Dirac : CroneEngine {
 
 	prAlloc {
 		var srv = context.server;
+		// The UGen class lives in Extensions/Dirac/Dirac.sc, installed by
+		// dirac.lua on its first run. It is looked up at RUN time, never named
+		// in source: if this class named `Dirac` directly and a tester
+		// restarted before that install, sclang would fail to compile the
+		// WHOLE class library and every engine on the norns would break. This
+		// way only Dirac fails, with a message saying what to do.
+		var diracUGen = \Dirac.asClass;
+		if (diracUGen.isNil) {
+			"### Engine_Dirac: the Dirac UGen is not installed yet. Load the dirac script once (it installs it), then SYSTEM > RESTART.".postln;
+			^this;
+		};
 
 		// Built as a FUNCTION-SYNTH via .play, not SynthDef + sync + Synth.new.
 		//
@@ -109,7 +120,7 @@ Engine_Dirac : CroneEngine {
 
 			// Held in a var rather than passed straight to Out.ar so the meter
 			// can tap the ACTUAL output, not a second evaluation of it.
-			var sig = Dirac.ar(src,
+			var sig = diracUGen.ar(src,
 				playhead, rate, posjtr, spread, detune, level, revprob, psprd,
 				texture, grains, fireAr, hold, semishift, grainlen, mix, feedback,
 				compress, binaural, scale, voct, speed, heads, headspread,

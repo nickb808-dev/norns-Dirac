@@ -19,7 +19,7 @@ NORNSINC     := -Inorns -Iengine
 # every build here, or the NaN guards exist only in the source.
 CXXFLAGS     := -std=c++17 -O2 -ffast-math -fno-finite-math-only -Wall -Wno-unused-parameter
 
-.PHONY: all check hosttest shimtest verify-vendor reference ugentest luacheck sccheck paramcheck portcheck clean help
+.PHONY: all check prebuiltcheck hosttest shimtest verify-vendor reference ugentest luacheck sccheck paramcheck portcheck clean help
 all: help
 
 # ── the Lua and glue-layer gates ─────────────────────────────────────────────
@@ -44,6 +44,10 @@ paramcheck:
 # The per-inlet case is the valuable one: it checks each control inlet ALONE,
 # against a full-signal baseline, and reports any inlet that changes no sample
 # as INERT rather than counting it as verified.
+# The Dirac.so that ships in ugen/prebuilt/ must be built from these sources.
+prebuiltcheck:
+	@bash tools/check-prebuilt.sh
+
 ugentest:
 	@bash tools/check-ugen-names.sh
 	@mkdir -p build
@@ -166,7 +170,7 @@ reference64: hosttest64
 	./build/t64 ident build/ident64-now.bin
 	$(call check_ref,build/ident64-now.bin,$(REFERENCE64),reference64)
 
-check: verify-vendor shimtest hosttest reference hosttest64 reference64 ugentest luacheck sccheck paramcheck
+check: verify-vendor shimtest hosttest reference hosttest64 reference64 ugentest luacheck sccheck paramcheck prebuiltcheck
 
 # ── run this ON THE PI ────────────────────────────────────────────────────────
 # Everything in `check` except verify-vendor, which needs an upstream ER-301
