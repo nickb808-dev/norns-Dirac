@@ -36,6 +36,11 @@ SC_DIR := $(firstword $(foreach d,$(SC_CANDIDATES),$(if $(wildcard $(d)/plugin_i
 
 SC_INC := -I$(SC_DIR)/plugin_interface -I$(SC_DIR)/common -I$(SC_DIR)
 
+# 32 grains, twice the ER-301's 16. Upstream's DIRAC_MAX_GRAINS option; the
+# Pi 4 runs the whole engine at maximum for 2-4% of scsynth's deadline.
+# lib/params.lua's density and grains maxima must equal this; check-params.sh fails otherwise.
+MAX_GRAINS ?= 32
+
 # ── flags ────────────────────────────────────────────────────────────────────
 # -ffast-math matches how the engine is built everywhere else. It DOES change
 # results slightly, which is expected and quantified: refdiff.py's tolerances
@@ -50,7 +55,7 @@ SC_INC := -I$(SC_DIR)/plugin_interface -I$(SC_DIR)/common -I$(SC_DIR)
 # guessing at armv7 flags is a good way to produce a plugin that will not load
 # on a Pi 3 later.
 CXXFLAGS := -std=c++17 -O2 -ffast-math -fno-finite-math-only -fPIC -Wall -Wno-unused-parameter \
-            -DFRAMELENGTH=$(FRAMELENGTH) -DNDEBUG \
+            -DFRAMELENGTH=$(FRAMELENGTH) -DNDEBUG -DDIRAC_MAX_GRAINS=$(MAX_GRAINS) \
             -I../norns -I../engine $(SC_INC)
 LDFLAGS  := -shared
 

@@ -81,4 +81,23 @@ if [ $fail -eq 0 ]; then
     n=$(echo "$lua_ids" | grep -c .)
     echo "check-params: OK    $n params+options: Lua = addCommand = SynthDef arg"
 fi
+# ── 4. the grain pool and the two params that range over it ──────────────────
+# ugen/Makefile builds the engine with DIRAC_MAX_GRAINS=$(MAX_GRAINS). Density
+# and the grains cap must top out at exactly that: past it the engine clamps
+# silently and the top of the dial does nothing; below it, the extra grains
+# are unreachable.
+pool=$(pgrep_o '^MAX_GRAINS\s*\?=\s*\K[0-9]+' ugen/Makefile | head -1)
+rate_max=$(pgrep_o '\{\s*id\s*=\s*"rate".*?max\s*=\s*\K[0-9.]+' lib/params.lua | head -1)
+grains_max=$(pgrep_o '\{\s*id\s*=\s*"grains".*?max\s*=\s*\K[0-9.]+' lib/params.lua | head -1)
+if [ -z "$pool" ] || [ -z "$rate_max" ] || [ -z "$grains_max" ]; then
+    echo "check-params: FAIL  could not read MAX_GRAINS / rate max / grains max"
+    fail=1
+elif [ "${rate_max%.0}" != "$pool" ] || [ "${grains_max%.0}" != "$pool" ]; then
+    echo "check-params: FAIL  engine pool is $pool grains, but density max = $rate_max,"
+    echo "                    grains max = $grains_max (lib/params.lua)"
+    fail=1
+else
+    echo "check-params: OK    density and grains both top out at the $pool-grain pool"
+fi
+
 exit $fail

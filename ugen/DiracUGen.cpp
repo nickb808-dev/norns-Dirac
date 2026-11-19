@@ -88,9 +88,15 @@ static inline bool isAudioRateInlet(int i) { return i == kIn || i == kFire; }
 // sclang with SendNodeReply - the mechanism SendReply uses - at display rate:
 //
 //   /dirac_viz  ~30 Hz   [sampleMode, frozen, capWrite, headPos01, nActive,
-//                         then per ACTIVE grain: readPos01, spawnPos01,
-//                         pitchSemi, brightness, pan, reverse]
-//   /dirac_wave  ~4 Hz   [capWrite, then kWaveBins peaks]
+//                         texture, then per ACTIVE grain: readPos01,
+//                         spawnPos01, pitchSemi, brightness, pan, reverse]
+//   /dirac_wave ~15 Hz   [capWrite, then kWaveBins peaks]
+//
+// texture is getVizTexture(): the envelope shape grains spawn with, 0
+// percussive .. 0.5 hann .. 1 tukey (a fixed Window maps to its nearest). The
+// UI draws each grain as a glyph of that shape, as the ER-301's field does.
+// 15 Hz waveform: 129 floats a frame is trivial, and at 4 Hz the live input
+// visibly stepped.
 //
 // Waveform peaks are |input| per kWaveBinLen samples, indexed by ABSOLUTE ring
 // position, so the UI rotates them against capWrite. They are the input as
@@ -101,9 +107,9 @@ static constexpr int kRingSize    = 131072;  // == Dirac::kCapBufSize (private);
 static constexpr int kWaveBins    = 128;     // one per screen column
 static constexpr int kWaveBinLen  = kRingSize / kWaveBins;   // 1024
 static constexpr int kVizHz       = 30;
-static constexpr int kWaveHz      = 4;
+static constexpr int kWaveHz      = 15;
 static constexpr int kVizPerGrain = 6;
-static constexpr int kVizHeader   = 5;
+static constexpr int kVizHeader   = 6;
 
 // Unqualified `Dirac` is this wrapper's unit. The engine is always `dirac::Dirac`.
 struct Dirac : public Unit {
@@ -339,6 +345,7 @@ void Dirac_next(Dirac *unit, int inNumSamples)
         m[2] = float(d->getCapWritePos());        // < 2^24: exact in a float
         m[3] = (sampleMode && d->mEndIndex > 0) ? float(d->getPosition()) / float(d->mEndIndex) : 0.0f;
         m[4] = float(active);
+        m[5] = d->getVizTexture();
         SendNodeReply(&unit->mParent->mNode, -1, "/dirac_viz", n, m);
     }
 

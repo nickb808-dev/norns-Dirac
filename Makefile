@@ -47,7 +47,7 @@ paramcheck:
 ugentest:
 	@bash tools/check-ugen-names.sh
 	@mkdir -p build
-	$(CXX) $(CXXFLAGS) -Inorns -Iengine -Itest/scstub -DFRAMELENGTH=64 \
+	$(CXX) $(CXXFLAGS) -Inorns -Iengine -Itest/scstub -DFRAMELENGTH=64 -DDIRAC_MAX_GRAINS=32 \
 	  $(ENGINE) norns/od/shim.cpp test/scstub/driver.cpp -o build/ugentest
 	@./build/ugentest
 

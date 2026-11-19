@@ -36,6 +36,10 @@
 
 namespace dirac {
 
+#ifndef DIRAC_MAX_GRAINS
+#define DIRAC_MAX_GRAINS 16
+#endif
+
 class Dirac : public od::Head
 {
 public:
@@ -131,7 +135,13 @@ public:
     // kMaxGrains is public so the host harness (test/host/main.cpp) can size
     // arrays with it at compile time; everything else in this block is the
     // supported read-only surface the viz and the harness share.
-    static constexpr int kMaxGrains = 16;
+    //
+    // DIRAC_MAX_GRAINS lets a port with CPU to spare build a bigger pool. The
+    // ER-301 build never defines it, so it is 16 there and nothing changes
+    // (ident render bit-identical). norns builds with 32: measured on a Pi 4,
+    // the whole engine at maximum settings costs 2-4% of scsynth's deadline.
+    // Density (Rate) is capped at the same number: density IS the overlap.
+    static constexpr int kMaxGrains = DIRAC_MAX_GRAINS;
     int   getGrainCount()         const { return kMaxGrains; }
     bool  isGrainActive(int i)    const { return mGrains[i].active; }
     int   getGrainSrcIndex(int i) const { return mGrains[i].srcIndex; }

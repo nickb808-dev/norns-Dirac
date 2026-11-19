@@ -507,7 +507,7 @@ int main()
     // 9. display data: what the norns UI will draw from.
     //    - /dirac_viz at ~30 Hz carries exactly the ACTIVE grains, each with a
     //      read position on [0,1] and a finite brightness;
-    //    - /dirac_wave at ~4 Hz carries 128 peaks that match the input level;
+    //    - /dirac_wave at ~15 Hz carries 128 peaks that match the input level;
     //    - the wrapper's ring size (kRingSize, a copy of the engine's private
     //      kCapBufSize) is RIGHT: one ring's worth of blocks brings the write
     //      head back to where it started. If upstream ever resizes the ring
@@ -537,15 +537,16 @@ int main()
         const double secs = double(blocks) * FRAMELENGTH / 48000.0;
         const double vizHz = gViz.count / secs, waveHz = gWave.count / secs;
 
-        bool vizOk = gViz.last.size() >= 5 && gViz.node == 1234;
+        bool vizOk = gViz.last.size() >= 6 && gViz.node == 1234;
         int active = 0, counted = 0;
         if (vizOk) {
             for (int g = 0; g < dirac::Dirac::kMaxGrains; ++g)
                 if (h.unit()->engine->isGrainActive(g)) ++counted;
             active = int(gViz.last[4]);
-            vizOk = (gViz.last.size() == size_t(5 + 6 * active));
+            vizOk = (gViz.last.size() == size_t(6 + 6 * active))
+                 && gViz.last[5] >= 0.0f && gViz.last[5] <= 1.0f;     // texture
             for (int g = 0; vizOk && g < active; ++g) {
-                const float rp = gViz.last[5 + g * 6], br = gViz.last[5 + g * 6 + 3];
+                const float rp = gViz.last[6 + g * 6], br = gViz.last[6 + g * 6 + 3];
                 vizOk = rp >= 0.0f && rp <= 1.0f && std::isfinite(br);
             }
         }
@@ -566,7 +567,7 @@ int main()
         char d[256];
         snprintf(d, sizeof d, "viz %.1f Hz (%d grains, engine %d), wave %.1f Hz peaks %.3f..%.3f, ring %s",
                  vizHz, active, counted, waveHz, pmin, pmax, ringOk ? "131072 ok" : "SIZE MISMATCH");
-        const bool rates = vizHz > 25 && vizHz < 35 && waveHz > 3 && waveHz < 5;
+        const bool rates = vizHz > 25 && vizHz < 35 && waveHz > 13 && waveHz < 17;
         report("viz", vizOk && countOk && waveOk && ringOk && rates && gOtherReplies == 0, d);
     }
 

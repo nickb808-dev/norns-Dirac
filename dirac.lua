@@ -91,10 +91,14 @@ local note, note_frames = nil, 0         -- one-line transient message
 local in_amp, out_amp = 0, 0
 
 -- ── the field: what the UGen streams (see ugen/DiracUGen.cpp) ───────────────
-local viz = { sample = false, frozen = false, cap = 0, head = 0, grains = {} }
+local viz = { sample = false, frozen = false, cap = 0, head = 0, texture = 0.5, grains = {} }
 local wave = { cap = 0, peaks = {} }
 local RING = 131072      -- engine ring size; the UGen's test proves it
 local BINS = 128
+
+-- Phosphor field functions, defined with the drawing code below; declared
+-- here because the redraw clock in init() calls decay_phosphor.
+local decay_phosphor, stamp, draw_phosphor
 
 -- File scope so cleanup() can stop them: norns does NOT stop a script's polls,
 -- and one left running fires into a dead callback forever.
@@ -129,7 +133,7 @@ function init()
       params:add_trigger(p.id, p.name)
       params:set_action(p.id, function()
         send(p.id, 1)
-        fire_flash = 4
+        fire_flash = 8
         clock.run(function() clock.sleep(0.02); send(p.id, 0) end)
       end)
     end
@@ -154,12 +158,14 @@ function init()
     engine_ok = false
   end
 
-  -- The field animates, so redraw every frame rather than on change.
+  -- The field animates, so redraw every frame rather than on change. 30 fps
+  -- matches the grain data rate; matron measured ~5% at 15 fps.
   clock.run(function()
     while true do
-      clock.sleep(1 / 15)
+      clock.sleep(1 / 30)
       if fire_flash > 0 then fire_flash = fire_flash - 1 end
       if note_frames > 0 then note_frames = note_frames - 1 end
+      decay_phosphor()
       redraw()
     end
   end)
@@ -173,9 +179,10 @@ function osc.event(path, args, from)
     viz.cap    = args[3]
     viz.head   = args[4]
     local n = math.floor(args[5])
+    viz.texture = args[6]
     local g = {}
     for i = 0, n - 1 do
-      local o = 5 + i * 6
+      local o = 6 + i * 6
       g[#g + 1] = { pos = args[o + 1], spawn = args[o + 2], pitch = args[o + 3],
                     bright = args[o + 4], pan = args[o + 5], rev = args[o + 6] > 0.5 }
     end
@@ -193,7 +200,7 @@ local function current_pair()
 end
 
 local function flash(msg)
-  note, note_frames = msg, 20
+  note, note_frames = msg, 40
 end
 
 local function adjust(id, d)
@@ -274,6 +281,63 @@ local function draw_toggle(x, y, label, on)
   return w
 end
 
+-- ── phosphor ─────────────────────────────────────────────────────────────────
+-- Grains are stamped into a brightness buffer that fades every frame, as the
+-- ER-301's field does (DiracFieldGraphic: additive hits, decay per frame), so
+-- a drifting grain leaves a short glowing trail and a dense cloud reads as a
+-- cloud. Sparse: only lit cells are stored, so cost scales with grains, not
+-- with the 128x40 field.
+local glow = {}             -- [y * 128 + x] = brightness 0..15
+local DECAY = 0.72          -- per frame at 30 fps: a trail of ~100 ms
+
+decay_phosphor = function()
+  for k, v in pairs(glow) do
+    v = v * DECAY
+    if v < 0.8 then glow[k] = nil else glow[k] = v end
+  end
+end
+
+local function hit(x, y, v)
+  if x < 0 or x > 127 or y < FY or y >= FY + FH then return end
+  local k = y * 128 + x
+  local cur = glow[k] or 0
+  if v > cur then glow[k] = v end
+end
+
+-- Glyph shape from the envelope the grains are spawning with (texture: 0
+-- percussive, 0.5 hann, 1 tukey; a fixed Window maps to its nearest), at three
+-- pixels across - what the screen allows. Faint grains are a single pixel;
+-- reverse grains point down, as on the ER-301.
+local GLYPH = {
+  perc  = { {-1,-1,1}, {-1,0,1}, {-1,1,1}, {0,0,0.7}, {1,0,0.4} },   -- sharp attack, tail
+  hann  = { {0,-1,0.6}, {-1,0,0.6}, {0,0,1}, {1,0,0.6}, {0,1,0.6} }, -- round
+  tukey = { {-1,-1,0.9}, {0,-1,0.9}, {1,-1,0.9}, {-1,0,0.9}, {0,0,1}, {1,0,0.9} }, -- flat top
+}
+
+stamp = function(x, y, b, rev)
+  local peak = 3 + 12 * b
+  if b < 0.25 then hit(x, y, peak); return end
+  local t = viz.texture or 0.5
+  local glyph = (t < 0.25) and GLYPH.perc or (t > 0.75) and GLYPH.tukey or GLYPH.hann
+  for _, p in ipairs(glyph) do hit(x + p[1], y + p[2], peak * p[3]) end
+  if rev then hit(x, y + 2, peak * 0.6) end
+end
+
+draw_phosphor = function()
+  -- one fill per brightness level: screen.level applies to the whole fill
+  local by = {}
+  for k, v in pairs(glow) do
+    local l = math.floor(util.clamp(v, 1, 15))
+    local t = by[l]; if not t then t = {}; by[l] = t end
+    t[#t + 1] = k
+  end
+  for l, cells in pairs(by) do
+    screen.level(l)
+    for _, k in ipairs(cells) do screen.pixel(k % 128, k // 128) end
+    screen.fill()
+  end
+end
+
 local function draw_field()
   -- waveform: dim columns, live ring only (sample peaks arrive with files)
   if not viz.sample and #wave.peaks == BINS then
@@ -300,11 +364,11 @@ local function draw_field()
     end
   end
 
-  -- grains: x = read position (or pan), y = pitch, brightness = envelope x gain
+  -- grains: phosphor glyphs (see "phosphor" above draw_field)
   for _, g in ipairs(viz.grains) do
     local x = view_stereo and xof((g.pan + 1) / 2) or xof(g.pos)
-    local y = math.floor(util.clamp(YC - g.pitch * PX_PER_ST, FY + 1, FY + FH - 2))
-    local lvl = math.floor(util.clamp(3 + 12 * math.sqrt(util.clamp(g.bright * 2, 0, 1)), 1, 15))
+    local y = math.floor(util.clamp(YC - g.pitch * PX_PER_ST, FY + 2, FY + FH - 3))
+    local b = util.clamp(math.sqrt(util.clamp(g.bright * 2, 0, 1)), 0, 1)
     if not view_stereo then
       -- read-span trail from where the grain started, as on the ER-301
       local sx = xof(g.spawn)
@@ -312,10 +376,9 @@ local function draw_field()
         screen.level(2); screen.move(sx + 0.5, y + 0.5); screen.line(x + 0.5, y + 0.5); screen.stroke()
       end
     end
-    screen.level(lvl)
-    screen.rect(x - 1, y - 1, 2, 2)
-    screen.fill()
+    stamp(x, y, b, g.rev)
   end
+  draw_phosphor()
 
   -- status, top right: visible toggles
   local x = 127

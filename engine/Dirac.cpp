@@ -614,7 +614,7 @@ void Dirac::process()
     // "Rate" is now a DENSITY control = target grain overlap. 0 = trigger-only;
     // otherwise the spawn rate is derived from grain length so grains overlap (no
     // more silent/gappy low end). Floored at kDensFloor so it never near-stops.
-    const float dens     = std::max(0.0f,  std::min(sanitize(mRateIn.buffer()[0]),   16.0f));
+    const float dens     = std::max(0.0f,  std::min(sanitize(mRateIn.buffer()[0]),   float(kMaxGrains)));
     const float playhead = std::max(0.0f,  std::min(sanitize(mPlayheadIn.buffer()[0]), 1.0f));
     const float posJtr   = std::max(0.0f,  std::min(sanitize(mPosJtrIn.buffer()[0]),  1.0f));
     const float sprd     = std::max(0.0f,  std::min(sanitize(mSprdIn.buffer()[0]),    1.0f));

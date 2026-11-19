@@ -56,10 +56,12 @@ return {
   -- INERT rather than pretending to have verified.
 
   -- ── the cloud ─────────────────────────────────────────────────────────────
-  { id = "rate",       name = "density",     min = 0.0,   max = 16.0, default = 3.0, detents = 320 },
+  { id = "rate",       name = "density",     min = 0.0,   max = 32.0, default = 3.0, detents = 640 },
   -- Density IS the simultaneous grain count: the engine sets
   -- hop = grainLen / overlap with overlap = rate, so alive grains = rate.
-  { id = "grains",     name = "grains",      min = 1,     max = 16,   default = 12, step = 1 },
+  -- 32, not the ER-301's 16: built with DIRAC_MAX_GRAINS=32 (ugen/Makefile).
+  -- Defaults are the ER-301's, so nothing sounds different below 16.
+  { id = "grains",     name = "grains",      min = 1,     max = 32,   default = 12, step = 1 },
   -- Exponential: three decades in 200 detents is ~3.5% per detent everywhere,
   -- so 20 ms and 500 ms are equally easy to land on. Same range as the ER-301.
   { id = "grainlen",   name = "grain length",min = 0.001, max = 1.0,  default = 0.050, unit = "s", warp = "exp" },
