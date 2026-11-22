@@ -1,16 +1,17 @@
 // norns/od/objects/heads/Head.h — the norns/SuperCollider shim.
 //
-// Dirac derives from od::Head only to inherit mpSample and setSample(); it
-// does not use the ER-301's transport (mCurrentIndex / mEndIndex) for
-// anything the norns build needs. attach()/release() are the SDK's
-// reference-counting hooks — no-ops here, because on norns the SC Buffer's
-// lifetime is managed by the server and the script, not by us.
+// Both engines derive from od::Head. Dirac inherits mpSample / setSample()
+// and sets its own mEndIndex; Noether overrides setSample() and calls this
+// one. setSample() follows the device SDK's order, because Noether relies on
+// it: publish nothing mid-swap, release the old sample, attach the new one,
+// publish last.
 //
-// NOTE for whoever wires up sample loading in v2: on the ER-301,
-// Head::setSample() reference-counts the SAMPLE OBJECT, which does NOT keep
-// its audio buffer alive (Sample::allocateBuffer begins with freeBuffer).
-// The SC equivalent is the same shape: holding a bufnum does not stop
-// /b_free. Validate on every read.
+// attach()/release() on the HEAD are the SDK's object reference counting —
+// no-ops here; the SC synth owns the unit's lifetime.
+//
+// On norns setSample() is called by the UGen wrappers on the audio thread at a
+// block boundary, so "mid-swap" cannot actually be observed; the order is kept
+// so the engines see exactly the semantics they were written against.
 #pragma once
 #include <od/objects/Object.h>
 #include <od/audio/Sample.h>
@@ -19,7 +20,23 @@ struct Head : Object {
     Sample *mpSample      = nullptr;
     int     mCurrentIndex = 0;
     int     mEndIndex     = 0;
-    virtual void setSample(Sample *s) { mpSample = s; }
+
+    virtual void setSample(Sample *sample)
+    {
+        Sample *p = mpSample;
+        mpSample = nullptr;
+        if (p) p->release();
+        p = sample;
+        if (p) {
+            p->attach();
+            mEndIndex = int(p->mSampleCount) - 2;
+        } else {
+            mEndIndex = 0;
+        }
+        mpSample = p;
+    }
+    virtual ~Head() { if (mpSample) mpSample->release(); }
+
     Sample *getSample() { return mpSample; }
     int  getPosition()  { return mCurrentIndex; }
     void attach()  {}

@@ -112,6 +112,9 @@ extern UnitDtorFunc scstub_dtor;
     do { scstub_ctor = (UnitCtorFunc)&name##_Ctor;                             \
          scstub_dtor = (UnitDtorFunc)&name##_Dtor; } while (0)
 
+#define DefineSimpleUnit(name)                                                 \
+    do { scstub_ctor = (UnitCtorFunc)&name##_Ctor; scstub_dtor = nullptr; } while (0)
+
 // The real macro defines a C entry point scsynth calls at load. Here it becomes
 // an ordinary function the driver calls itself.
 #define PluginLoad(name)  void scstub_pluginload(InterfaceTable *inTable)

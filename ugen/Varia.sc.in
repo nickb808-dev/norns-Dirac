@@ -1,0 +1,23 @@
+// Varia.sc.in - SuperCollider class for the Varia filter UGen.
+//
+// Same rules as Dirac.sc.in (read its header): the .in extension keeps sclang
+// from compiling a second copy out of ~/dust/code, and the file is ASCII only.
+//
+// ARGUMENT ORDER IS LOAD-BEARING. It must match the enum in VariaUGen.cpp;
+// tools/check-ugen-names.sh compares them.
+Varia : MultiOutUGen {
+
+	*ar { arg inL = 0.0, inR = 0.0,
+		freq = 1000.0, width = 0.5, res = 0.0, type = 0.0,
+		peaks = 0.0, phase = 0.0;
+
+		^this.multiNew('audio', inL, inR,
+			freq, width, res, type,
+			peaks, phase);
+	}
+
+	init { arg ... theInputs;
+		inputs = theInputs;
+		^this.initOutputs(2, rate);
+	}
+}

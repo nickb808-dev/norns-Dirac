@@ -80,4 +80,64 @@ else
     fail=1
 fi
 
+# ── Noether: the same three checks ───────────────────────────────────────────
+reg=$(pgrep_o 'DefineDtorUnit\(\K[A-Za-z_]+' ugen/NoetherUGen.cpp | head -1)
+cls=$(pgrep_o '^\s*\K[A-Za-z_]+(?=\s*:\s*MultiOutUGen)' ugen/Noether.sc.in | head -1)
+if [ -n "$reg" ] && [ "$reg" = "$cls" ]; then
+    echo "check-ugen-names: OK    unit registered as '$reg', SC class is '$cls'"
+else
+    echo "check-ugen-names: FAIL  plugin registers '$reg' but SC class is '$cls'"
+    fail=1
+fi
+engine_order=$(sed -n '/^Noether::Noether(/,/^}/p' engine/Noether.cpp \
+               | pgrep_o 'addInput\(\K[A-Za-z_]+')
+wrapper_order=$(sed -n '/od::Port \*portFor/,/^}/p' ugen/NoetherUGen.cpp \
+                | pgrep_o 'return &d->\K[A-Za-z_]+')
+if [ -z "$engine_order" ] || [ -z "$wrapper_order" ]; then
+    echo "check-ugen-names: FAIL  could not extract Noether's inlet order"
+    fail=1
+elif [ "$engine_order" = "$wrapper_order" ]; then
+    echo "check-ugen-names: OK    $(echo "$engine_order" | grep -c .) Noether inlets, wrapper order matches engine order"
+else
+    echo "check-ugen-names: FAIL  Noether wrapper inlet order does not match the engine's"
+    diff <(echo "$engine_order") <(echo "$wrapper_order") | sed 's/^/                        /'
+    fail=1
+fi
+n_wrap=$(sed -n '/od::Port \*portFor/,/^}/p' ugen/NoetherUGen.cpp | grep -c 'return &d->')
+n_opts=$(grep -c 'Opt\.set(' ugen/NoetherUGen.cpp)
+n_extra=$(grep -oE 'IN0\(k(Buf|UndoBuf|Clear)\)' ugen/NoetherUGen.cpp | sort -u | wc -l | tr -d ' ')
+n_sc=$(sed -n '/\*ar {/,/multiNew/p' ugen/Noether.sc.in \
+       | pgrep_o '\b[a-zA-Z][a-zA-Z0-9]*\s*=' | wc -l)
+want=$((n_wrap + n_opts + n_extra))
+if [ "$n_sc" -eq "$want" ]; then
+    echo "check-ugen-names: OK    $n_sc Noether SC arguments = $n_wrap inlets + $n_opts option + $n_extra wrapper inputs (loop, undo, clear)"
+else
+    echo "check-ugen-names: FAIL  Noether.sc declares $n_sc arguments, wrapper wants $want"
+    fail=1
+fi
+
+# ── Varia: registered name, and the SC args = the wrapper's enum, in order ───
+reg=$(pgrep_o 'DefineSimpleUnit\(\K[A-Za-z_]+' ugen/VariaUGen.cpp | head -1)
+cls=$(pgrep_o '^\s*\K[A-Za-z_]+(?=\s*:\s*MultiOutUGen)' ugen/Varia.sc.in | head -1)
+if [ -n "$reg" ] && [ "$reg" = "$cls" ]; then
+    echo "check-ugen-names: OK    unit registered as '$reg', SC class is '$cls'"
+else
+    echo "check-ugen-names: FAIL  plugin registers '$reg' but SC class is '$cls'"
+    fail=1
+fi
+# enum kInL, kInR, kFreq... -> inl inr freq ...; SC args lowercased
+wrap_args=$(pgrep_o 'enum \{[^}]*\}' ugen/VariaUGen.cpp | pgrep_o '\bk\K[A-Za-z]+' \
+            | grep -v '^NumInputs$' | tr 'A-Z' 'a-z')
+sc_args=$(sed -n '/\*ar {/,/;/p' ugen/Varia.sc.in | pgrep_o '\b[a-zA-Z][a-zA-Z0-9]*(?=\s*=)' | tr 'A-Z' 'a-z')
+if [ -z "$wrap_args" ] || [ -z "$sc_args" ]; then
+    echo "check-ugen-names: FAIL  could not extract Varia's inputs"
+    fail=1
+elif [ "$wrap_args" = "$sc_args" ]; then
+    echo "check-ugen-names: OK    $(echo "$sc_args" | grep -c .) Varia SC arguments, same names and order as the wrapper"
+else
+    echo "check-ugen-names: FAIL  Varia.sc arguments do not match VariaUGen.cpp's enum"
+    diff <(echo "$wrap_args") <(echo "$sc_args") | sed 's/^/                        /'
+    fail=1
+fi
+
 exit $fail

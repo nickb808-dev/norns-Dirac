@@ -40,7 +40,7 @@ if [ -n "$LUAC" ]; then
     # (`viz` in a dim rule, `sample_loaded` and `note` in flash/the rules).
     # The bytecode shows it: every _ENV read/write must be a norns/Lua global
     # or one of the script callbacks norns calls.
-    allowed_r=" _path clock controlspec engine include io ipairs pairs math norns osc params poll redraw require screen string table tonumber tostring type util os print "
+    allowed_r=" _path clock controlspec engine include io ipairs pairs math norns osc params poll redraw require screen string table tonumber tostring type util os print midi "
     allowed_w=" init enc key redraw cleanup "
     bad=""
     for g in $($LUAC -p -l norns-dirac.lua | grep -oE 'GETTABUP.*_ENV "[A-Za-z_0-9]+"' | grep -oE '"[^"]+"' | tr -d '"' | sort -u); do

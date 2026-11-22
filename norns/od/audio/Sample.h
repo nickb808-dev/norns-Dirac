@@ -1,35 +1,48 @@
 // norns/od/audio/Sample.h — the norns/SuperCollider shim.
 //
-// Field-for-field identical to the ER-301's public surface, because that is
-// all the engine touches (mpData / mSampleCount / mChannelCount). On norns
-// this is a VIEW ONTO A SUPERCOLLIDER BUFFER, not an owner:
+// The ER-301's public surface, as far as the two vendored engines touch it:
+// Dirac reads mpData / mSampleCount / mChannelCount; Noether also reads
+// mSampleLoadCount, calls setDirty(), and attach()es / release()s the samples
+// it holds. Types are the device SDK's (uint32_t counts), which both engines
+// already compile against on the ER-301. On norns this is a VIEW ONTO A
+// SUPERCOLLIDER BUFFER, not an owner:
 //
 //     SndBuf *b = ...;                    // from the server, via bufnum
 //     od::Sample s;
-//     s.mpData        = b->data;
-//     s.mSampleCount  = b->frames;        // FRAMES, not floats
-//     s.mChannelCount = b->channels;
+//     s.mpData           = b->data;
+//     s.mSampleCount     = b->frames;     // FRAMES, not floats
+//     s.mSampleLoadCount = b->frames;     // a server buffer is always "loaded"
+//     s.mChannelCount    = b->channels;
 //
 // Two traps carried over from the ER-301 work, both learned the hard way:
 //
 //  1. mSampleCount counts FRAMES. Indexing is mpData[i * mChannelCount + ch].
-//     (The ER-301's od::Sample::get() is exactly that; Landau's peak scan had
-//     to be checked against it.)
 //  2. The buffer is NOT ours and can be freed or reallocated underneath us.
 //     SuperCollider's /b_free and /b_alloc are asynchronous with the audio
 //     thread, which is the same hazard as the ER-301 sample pool's
-//     allocateBuffer() calling freeBuffer() first. Re-validate mpData every
-//     time it is read; never cache the pointer or the length across blocks.
+//     allocateBuffer() calling freeBuffer() first. The wrappers rebuild this
+//     view from the SndBuf every block; never cache the pointer or the length
+//     across blocks.
 //
-// v1 does not load samples (live granulation only), so this exists to satisfy
-// the vendored engine's signature. Phase "v2 sample loading" is where it gets
-// wired to a real Buffer.
+// attach() / release(): on the device these reference-count the Sample
+// OBJECT. Here the server and the script own the buffer's lifetime, so they
+// only count, and nothing is ever destroyed by reaching zero.
 #pragma once
 #include <cstddef>
+#include <cstdint>
 namespace od {
 struct Sample {
-    size_t mSampleCount  = 0;    // FRAMES
-    int    mChannelCount = 1;
-    float *mpData        = nullptr;   // borrowed from the SC server
+    uint32_t mSampleCount     = 0;        // FRAMES allocated
+    uint32_t mSampleLoadCount = 0;        // FRAMES loaded (= mSampleCount here)
+    uint32_t mChannelCount    = 1;
+    float   *mpData           = nullptr;  // borrowed from the SC server
+    float    mSampleRate      = 48000.0f;
+    bool     mDirty           = false;
+    int      mRefs            = 0;
+
+    void attach()   { ++mRefs; }
+    void release()  { --mRefs; }
+    void setDirty() { mDirty = true; }
+    void setClean() { mDirty = false; }
 };
 } // namespace od

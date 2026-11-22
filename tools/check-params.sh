@@ -36,7 +36,7 @@ sc_cmds=$(sed -n '/One command per parameter/,/^	}/p' lib/Engine_Dirac.sc \
           | pgrep_o '\\\K[a-zA-Z]+' | sort -u)
 
 # SynthDef arguments: everything between `arg` and the closing `;`.
-sc_args=$(sed -n '/synth = {/,/playheadsOpt = 1, diffuseOpt = 1, freezeOpt = 1;/p' lib/Engine_Dirac.sc \
+sc_args=$(cat lib/Engine_Dirac.sc \
           | pgrep_o '(?<![a-zA-Z\\])\b[a-zA-Z][a-zA-Z0-9]*(?=\s*=)' | sort -u)
 
 emptycheck() {
@@ -114,7 +114,10 @@ if command -v lua >/dev/null 2>&1; then
 -- param. A param left off every page is reachable only from the PARAMS menu,
 -- which is how "I can't see grain count" happens.
 local SPEC = dofile("lib/params.lua")
-local OFF_PAGE = { fire = "K3" }
+-- on keys rather than pages: fire is K3, rec is K3 on the loop pages (and
+-- K1 + K3 anywhere), stop is K2 on the loop pages
+local OFF_PAGE = { fire = "K3", lrec = "K3", lstop = "K2", order = "chain view",
+                   m1map = "learned", m2map = "learned", m3map = "learned", m4map = "learned" }
 local ids = {}
 for _, p in ipairs(SPEC) do ids[p.id] = true end
 local src = assert(io.open("norns-dirac.lua")):read("a")

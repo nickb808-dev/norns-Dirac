@@ -27,7 +27,63 @@ make verify-vendor UPSTREAM=../dirac
 | 2026-11-18 | v0.2.12 + `1cab15c` | `DIRAC_MAX_GRAINS` build option, made upstream for this port (default 16; the ER-301 build is unchanged and its `ident` render bit-identical). The norns UGen builds with 32 (`ugen/Makefile` `MAX_GRAINS`); host tests and references stay at the default 16. Measured on the Pi: 13.2% avg of scsynth's deadline at 32 grains with everything at maximum, no xruns. |
 | 2026-11-18 | v0.2.12 + `6f34a28` | Read-only `getCapData()` and a public `kCapBufSize`, made upstream for this port (no behaviour change; ER-301 `ident` bit-identical). The norns UGen uses them to save the ring (capture) and to draw waveform peaks from the ring itself, feedback included, and wraps against the engine's own ring size instead of a copied constant. |
 
+## Noether (the looper)
+
+`engine/Noether.{h,cpp}` is a verbatim vendored copy of the ER-301 looper
+engine from the `noether` repo. Same rules: develop it upstream, copy it here,
+and `make verify-vendor` (with `NOETHER_UPSTREAM`, default `../noether`) fails
+on any difference.
+
+```
+make verify-vendor UPSTREAM=../dirac NOETHER_UPSTREAM=../noether
+```
+
+`test/noether-host/` is upstream's host harness (`test/host/main.cpp`, its `od/`
+stubs, and the `NoetherReel.h` / `NoetherScale.h` / `NoetherLut.h` it includes),
+with ONE change: its block counts are durations. Upstream renders "N blocks"
+and judges times (a 5 ms fade is over after 3 blocks of 128; at 64 it is not),
+so 7 of its 25 suites failed at the 64-sample block norns runs, while the
+engine itself is per-sample throughout (every time constant is computed per
+sample in the constructor). Literal block counts became `nb(N)` (N blocks of
+128 as blocks of this build; identity at 128), and the few presses written as
+an offset past sample 63 of a block keep their absolute time. At 128 the
+harness's output is byte-identical to upstream's, every suite. `make
+noethertest` runs all 25 at 128 and at 64 (`test/noether-host-fl64/` shadows
+the harness's `od/config.h`).
+
+| Date       | Upstream version | What was synced |
+|------------|------------------|-----------------|
+| 2026-11-21 | 0.8.14 (`d46b9ac`) | Initial vendoring: engine, the 25-suite harness (block counts as durations, above). The norns shim gained what Noether uses of the SDK: `od::Sample`'s `mSampleLoadCount`, `setDirty()` and reference counting, and `od::Head::setSample()` in the device SDK's order. Dirac's wrapper tests pass unchanged against the extended shim. |
+
 ---
+
+## Varia (the filter)
+
+The filter unit is **derived** from the ER-301 package Varia (`variable-bw`,
+v0.4.1), not vendored: `engine/VariaFilter.h` keeps Varia's process loop and
+coefficient math line for line (two Cytomic SVFs in series, resonance map,
+Peaks, stereo peak phase, soft limit, denormal flush) and adds one control,
+*type*, which glides the two band edges so the filter sweeps lowpass -> band
+-> highpass. A parked edge is damped to Butterworth and, in the last quarter
+of its travel, crossfaded out. Level is dropped (the SynthDef's mix does it).
+
+What is vendored, and checked by `make verify-vendor` (`VARIA_UPSTREAM`,
+default `../variable-bw`):
+
+- `engine/svf_math.h`, used as is;
+- `test/varia-host/ref/VariableBW.{h,cpp}` and `test/varia-host/od/`, the
+  reference the derived filter is tested against.
+
+`make variatest` runs the suite twice. In a strict IEEE build, *type* 0.5 on
+noise with every control moving is bit-identical to upstream's
+`VariableBW::process()`. Under the shipped `-ffast-math` the two files
+reassociate differently; the difference is bounded (about -100 dB). Varia
+changes upstream are not picked up automatically: re-sync by hand and the
+`ident` case says whether the band path still matches.
+
+| Date       | Upstream version | What was synced |
+|------------|------------------|-----------------|
+| 2026-11-22 | 0.4.1 (`4c53304`) | Initial derivation: `svf_math.h`, the reference copy, and `VariaFilter.h`. |
 
 ## Why verbatim, and not a submodule
 

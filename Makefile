@@ -10,6 +10,8 @@
 #
 VERSION      := 0.1.0
 UPSTREAM     ?= ../dirac
+NOETHER_UPSTREAM ?= ../noether
+VARIA_UPSTREAM ?= ../variable-bw
 ENGINE       := engine/Dirac.cpp
 HOSTINC      := -Itest/host -Iengine
 NORNSINC     := -Inorns -Iengine
@@ -19,7 +21,7 @@ NORNSINC     := -Inorns -Iengine
 # every build here, or the NaN guards exist only in the source.
 CXXFLAGS     := -std=c++17 -O2 -ffast-math -fno-finite-math-only -Wall -Wno-unused-parameter
 
-.PHONY: all check prebuiltcheck hosttest shimtest verify-vendor reference ugentest luacheck sccheck paramcheck portcheck clean help
+.PHONY: all check prebuiltcheck variatest noethertest hosttest shimtest verify-vendor reference ugentest luacheck sccheck paramcheck portcheck clean help
 all: help
 
 # ── the Lua and glue-layer gates ─────────────────────────────────────────────
@@ -54,6 +56,11 @@ ugentest:
 	$(CXX) $(CXXFLAGS) -Inorns -Iengine -Itest/scstub -DFRAMELENGTH=64 -DDIRAC_MAX_GRAINS=32 \
 	  $(ENGINE) norns/od/shim.cpp test/scstub/driver.cpp -o build/ugentest
 	@./build/ugentest
+	$(CXX) $(CXXFLAGS) -Wno-mismatched-tags -Wno-inconsistent-missing-override -Inorns -Iengine -Itest/scstub -DFRAMELENGTH=64 \
+	  engine/Noether.cpp norns/od/shim.cpp test/scstub/noether_driver.cpp -o build/noethertest
+	@./build/noethertest
+	$(CXX) $(CXXFLAGS) -Iengine -Itest/scstub test/scstub/varia_driver.cpp -o build/variadrv
+	@./build/variadrv
 
 # ── the ported ER-301 harness ────────────────────────────────────────────────
 # Identical source to upstream's test/host. If this passes here and there, the
@@ -85,8 +92,44 @@ hosttest:
 shimtest:
 	@mkdir -p build
 	$(CXX) $(CXXFLAGS) $(NORNSINC) -c $(ENGINE) -o build/dirac_norns.o
+	$(CXX) $(CXXFLAGS) $(NORNSINC) -c engine/Noether.cpp -o build/noether_norns.o
 	$(CXX) $(CXXFLAGS) $(NORNSINC) -c norns/od/shim.cpp -o build/shim.o
-	@echo ">>> shimtest: OK — vendored engine compiles clean against norns/od/"
+	@echo ">>> shimtest: OK — both vendored engines compile clean against norns/od/"
+
+# ── Noether: the looper engine, vendored from the ER-301 repo `noether` ──────
+# Upstream's 25-suite host harness, run at the ER-301's block size AND at the
+# 64 norns runs. The harness here is upstream's with its block counts made
+# durations (nb(), identity at 128 — its 128 output is byte-identical to
+# upstream's); see ENGINE-PROVENANCE.md.
+NOETHERSUITES := ident length seam pulse tri speed sos extend voct persist detent aa viz \
+                 undo stop clock bars dub close seamq clean syncdub stoprec barview nan
+NTFLAGS := -std=c++17 -O2 -ffast-math -fno-finite-math-only -w
+define run_noether
+	@for s in $(NOETHERSUITES); do \
+	  if $(1) $$s > build/nt-$$s.txt 2>&1; then printf '  ok   noether %s%s\n' $$s "$(2)"; \
+	  else cat build/nt-$$s.txt; printf '  FAIL noether %s%s\n' $$s "$(2)"; exit 1; fi; done
+endef
+noethertest:
+	@mkdir -p build
+	$(CXX) $(NTFLAGS) -Itest/noether-host -Iengine engine/Noether.cpp test/noether-host/main.cpp -o build/nt
+	$(CXX) $(NTFLAGS) -Itest/noether-host-fl64 -Itest/noether-host -Iengine engine/Noether.cpp test/noether-host/main.cpp -o build/nt64
+	$(call run_noether,./build/nt,)
+	$(call run_noether,./build/nt64, @64)
+	@echo ">>> noethertest: 25 suites at 128 and at 64"
+
+# ── the filter: engine/VariaFilter.h, derived from Varia (`variable-bw`) ─────
+# Run twice. Strict IEEE first: there, type 0.5 must be BIT-IDENTICAL to a
+# verbatim copy of upstream's VariableBW (test/varia-host/ref/). Then with the
+# flags the plugin ships with, where -ffast-math may reassociate the two files
+# differently (ulps; the suite bounds them).
+VTSRC := -Dprivate=public -Itest/varia-host -Itest/varia-host/ref -Iengine \
+         test/varia-host/ref/VariableBW.cpp test/varia-host/main.cpp
+variatest:
+	@mkdir -p build
+	$(CXX) -std=c++17 -O2 -ffp-contract=off -w $(VTSRC) -o build/vt-strict
+	$(CXX) $(NTFLAGS) -DVT_FAST $(VTSRC) -o build/vt-fast
+	@./build/vt-strict
+	@./build/vt-fast
 
 # ── vendoring gate ───────────────────────────────────────────────────────────
 # ENGINE-PROVENANCE says the engine is not developed here. This makes that
@@ -104,7 +147,38 @@ verify-vendor:
 	    echo "                     fix it upstream and re-sync (ENGINE-PROVENANCE.md)"; \
 	    fail=1; \
 	  fi; \
-	done; exit $$fail
+	done; \
+	if [ -d "$(NOETHER_UPSTREAM)/src" ]; then \
+	  for f in Noether.h Noether.cpp; do \
+	    if diff -q "$(NOETHER_UPSTREAM)/src/$$f" "engine/$$f" >/dev/null 2>&1; then \
+	      echo "verify-vendor: OK    engine/$$f matches upstream"; \
+	    else \
+	      echo "verify-vendor: FAIL  engine/$$f DIFFERS from $(NOETHER_UPSTREAM)/src/$$f"; \
+	      fail=1; \
+	    fi; \
+	  done; \
+	else \
+	  echo "verify-vendor: FAIL  no Noether upstream at $(NOETHER_UPSTREAM) — pass NOETHER_UPSTREAM=<path>"; \
+	  fail=1; \
+	fi; \
+	if [ -d "$(VARIA_UPSTREAM)/src" ]; then \
+	  for f in src/svf_math.h:engine/svf_math.h \
+	           src/VariableBW.h:test/varia-host/ref/VariableBW.h \
+	           src/VariableBW.cpp:test/varia-host/ref/VariableBW.cpp \
+	           test/host/od/config.h:test/varia-host/od/config.h \
+	           test/host/od/objects/Object.h:test/varia-host/od/objects/Object.h; do \
+	    up=$$(echo $$f | cut -d: -f1); here=$$(echo $$f | cut -d: -f2); \
+	    if diff -q "$(VARIA_UPSTREAM)/$$up" "$$here" >/dev/null 2>&1; then \
+	      echo "verify-vendor: OK    $$here matches Varia"; \
+	    else \
+	      echo "verify-vendor: FAIL  $$here DIFFERS from $(VARIA_UPSTREAM)/$$up"; \
+	      fail=1; \
+	    fi; \
+	  done; \
+	else \
+	  echo "verify-vendor: FAIL  no Varia upstream at $(VARIA_UPSTREAM) — pass VARIA_UPSTREAM=<path>"; \
+	  fail=1; \
+	fi; exit $$fail
 
 # ── the cross-target references ──────────────────────────────────────────────
 # `ident` rendered by the CANONICAL engine: deterministic RNG seed, fixed
@@ -170,7 +244,7 @@ reference64: hosttest64
 	./build/t64 ident build/ident64-now.bin
 	$(call check_ref,build/ident64-now.bin,$(REFERENCE64),reference64)
 
-check: verify-vendor shimtest hosttest reference hosttest64 reference64 ugentest luacheck sccheck paramcheck prebuiltcheck
+check: verify-vendor shimtest noethertest variatest hosttest reference hosttest64 reference64 ugentest luacheck sccheck paramcheck prebuiltcheck
 
 # ── run this ON THE PI ────────────────────────────────────────────────────────
 # Everything in `check` except verify-vendor, which needs an upstream ER-301
@@ -207,6 +281,7 @@ help:
 	@echo "  make check           all ten gates (off-device)"
 	@echo "  make hosttest        the ported ER-301 harness at FRAMELENGTH=128"
 	@echo "  make hosttest64      the same harness at 64 — what norns runs"
+	@echo "  make variatest       the filter vs Varia (bit-exact at type 0.5) + its modes"
 	@echo "  make shimtest        compile the engine against norns/od/"
 	@echo "  make verify-vendor   UPSTREAM=../dirac"
 	@echo "  make reference       diff vs the canonical 128 render (ER-301 parity)"

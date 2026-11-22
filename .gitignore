@@ -3,5 +3,6 @@ build/
 *.so
 .DS_Store
 
-# The shipped plugin (tools/make-prebuilt.sh) is the one .so that is tracked.
-!ugen/prebuilt/Dirac.so
+# The shipped plugins (tools/make-prebuilt.sh) are the only .so files tracked:
+# ;install never compiles, so Dirac, Noether and Varia must all be in the repo.
+!ugen/prebuilt/*.so

@@ -1,7 +1,7 @@
 # ugen/Makefile — build the Dirac scsynth plugin natively on the norns.
 #
-#   make          build Dirac.so
-#   make install  copy Dirac.so + Dirac.sc into the SC Extensions dir
+#   make          build Dirac.so, Noether.so and Varia.so
+#   make install  copy the plugins + their class files into the SC Extensions dir
 #   make info     print what was detected, without building
 #
 # Built ON THE TARGET on purpose. The Pi runs a 32-bit armv7l userland (probed:
@@ -14,6 +14,13 @@ PLUGIN   := Dirac
 ENGINE   := ../engine/Dirac.cpp
 SHIM     := ../norns/od/shim.cpp
 WRAPPER  := DiracUGen.cpp
+# Noether, the looper that sits before Dirac: its own plugin, same folder.
+NPLUGIN  := Noether
+NENGINE  := ../engine/Noether.cpp
+NWRAPPER := NoetherUGen.cpp
+# Varia, the filter: header-only DSP (engine/VariaFilter.h), its own plugin.
+VPLUGIN  := Varia
+VWRAPPER := VariaUGen.cpp
 
 # ── scsynth's block size is NOT a free choice ────────────────────────────────
 # The engine bakes FRAMELENGTH in at compile time. norns launches scsynth with
@@ -80,10 +87,10 @@ EXTDIR := $(HOME)/.local/share/SuperCollider/Extensions/$(PLUGIN)
 verify:
 	@# An ABSENT plugin generates no complaint, so a grep-only check passes
 	@# when nothing is installed. That is not a pass, it is a missing subject.
-	@test -f $(EXTDIR)/$(PLUGIN).so || { \
-	  echo "verify: FAIL  $(EXTDIR)/$(PLUGIN).so does not exist."; \
+	@for p in $(PLUGIN) $(NPLUGIN) $(VPLUGIN); do test -f $(EXTDIR)/$$p.so || { \
+	  echo "verify: FAIL  $(EXTDIR)/$$p.so does not exist."; \
 	  echo "              Nothing to verify - run 'make install' first."; \
-	  exit 1; }
+	  exit 1; }; done
 	@# THE REAL TEST: dlopen, exactly what scsynth does at boot, with no audio
 	@# hardware involved.
 	@#
@@ -97,8 +104,9 @@ verify:
 	@# unresolved symbols and ABI mismatches - every failure that stops scsynth
 	@# booting - and needs no sound card, no free port and no running server.
 	@python3 -c "import ctypes, sys; \
-	  ctypes.CDLL('$(EXTDIR)/$(PLUGIN).so'); \
-	  print('verify: OK    dlopen succeeded - scsynth will load this plugin')" \
+	  ctypes.CDLL('$(EXTDIR)/$(PLUGIN).so'); ctypes.CDLL('$(EXTDIR)/$(NPLUGIN).so'); \
+	  ctypes.CDLL('$(EXTDIR)/$(VPLUGIN).so'); \
+	  print('verify: OK    dlopen succeeded - scsynth will load all three plugins')" \
 	  || { \
 	    echo "verify: FAIL  dlopen refused the plugin (above). scsynth would"; \
 	    echo "              refuse to BOOT with this installed - no audio, no"; \
@@ -108,14 +116,14 @@ verify:
 	@# name our plugin in a complaint. A failure to init audio is EXPECTED here
 	@# and is not a plugin problem, so it is not treated as one.
 	@out=$$(timeout 20 scsynth -u 57999 -i 2 -o 2 2>&1 | head -40); \
-	 if echo "$$out" | grep -qi "$(PLUGIN).so"; then \
-	   echo "verify: FAIL  scsynth complained about the plugin:"; \
-	   echo "$$out" | grep -i "$(PLUGIN)" | sed 's/^/              /'; \
+	 if echo "$$out" | grep -qiE "$(PLUGIN).so|$(NPLUGIN).so|$(VPLUGIN).so"; then \
+	   echo "verify: FAIL  scsynth complained about a plugin:"; \
+	   echo "$$out" | grep -iE "$(PLUGIN)|$(NPLUGIN)|$(VPLUGIN)" | sed 's/^/              /'; \
 	   exit 1; \
 	 fi; \
 	 echo "verify: OK    scsynth start-up mentions no plugin problem"
 
-all: $(PLUGIN).so
+all: $(PLUGIN).so $(NPLUGIN).so $(VPLUGIN).so
 
 $(PLUGIN).so: $(WRAPPER) $(ENGINE) $(SHIM) $(PLUGIN).sc.in
 	@if [ -z "$(SC_DIR)" ]; then \
@@ -152,6 +160,36 @@ $(PLUGIN).so: $(WRAPPER) $(ENGINE) $(SHIM) $(PLUGIN).sc.in
 	@echo "OK: $@"
 	@file $@ 2>/dev/null || true
 
+# Same build and the same artifact checks as Dirac.so, for the looper.
+$(NPLUGIN).so: $(NWRAPPER) $(NENGINE) $(SHIM) $(NPLUGIN).sc.in
+	@if [ -z "$(SC_DIR)" ]; then echo "ERROR: SC_PlugIn.h not found (make info)"; exit 1; fi
+	@echo "building $(NPLUGIN).so  (FRAMELENGTH=$(FRAMELENGTH), headers in $(SC_DIR))"
+	@rm -f $@
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(NWRAPPER) $(NENGINE) $(SHIM)
+	@sz=$$(wc -c < $@); \
+	 if [ "$$sz" -lt 10000 ] || ! file $@ 2>/dev/null | grep -q 'shared object'; then \
+	   echo "build: FAIL  $@ is not a complete shared object ($$sz bytes)"; rm -f $@; exit 1; \
+	 fi; \
+	 if command -v readelf >/dev/null 2>&1 && ! readelf -l $@ >/dev/null 2>&1; then \
+	   echo "build: FAIL  $@ has unreadable program headers - truncated."; rm -f $@; exit 1; \
+	 fi; \
+	 echo "build: OK    $@ is a $$sz-byte shared object"
+
+# The filter: no engine .cpp, no shim.
+$(VPLUGIN).so: $(VWRAPPER) ../engine/VariaFilter.h ../engine/svf_math.h $(VPLUGIN).sc.in
+	@if [ -z "$(SC_DIR)" ]; then echo "ERROR: SC_PlugIn.h not found (make info)"; exit 1; fi
+	@echo "building $(VPLUGIN).so  (headers in $(SC_DIR))"
+	@rm -f $@
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) -o $@ $(VWRAPPER)
+	@sz=$$(wc -c < $@); \
+	 if [ "$$sz" -lt 4000 ] || ! file $@ 2>/dev/null | grep -q 'shared object'; then \
+	   echo "build: FAIL  $@ is not a complete shared object ($$sz bytes)"; rm -f $@; exit 1; \
+	 fi; \
+	 if command -v readelf >/dev/null 2>&1 && ! readelf -l $@ >/dev/null 2>&1; then \
+	   echo "build: FAIL  $@ has unreadable program headers - truncated."; rm -f $@; exit 1; \
+	 fi; \
+	 echo "build: OK    $@ is a $$sz-byte shared object"
+
 info:
 	@echo "SC headers   : $(if $(SC_DIR),$(SC_DIR),NOT FOUND)"
 	@echo "FRAMELENGTH  : $(FRAMELENGTH)"
@@ -164,7 +202,7 @@ info:
 # would be a second definition of the class and the whole class library would
 # fail: "duplicate Class found: 'Dirac'". That takes down every script on the
 # norns, not just this one.
-install: $(PLUGIN).so
+install: $(PLUGIN).so $(NPLUGIN).so $(VPLUGIN).so
 	@test -s $(PLUGIN).sc.in || { \
 	  echo "install: FAIL  $(PLUGIN).sc.in is missing or EMPTY."; \
 	  echo "               Refusing to install a class file with no class in it —"; \
@@ -173,9 +211,19 @@ install: $(PLUGIN).so
 	@grep -qE '^$(PLUGIN) *: *MultiOutUGen' $(PLUGIN).sc.in || { \
 	  echo "install: FAIL  $(PLUGIN).sc.in does not declare '$(PLUGIN) : MultiOutUGen'"; \
 	  exit 1; }
+	@grep -qE '^$(NPLUGIN) *: *MultiOutUGen' $(NPLUGIN).sc.in || { \
+	  echo "install: FAIL  $(NPLUGIN).sc.in does not declare '$(NPLUGIN) : MultiOutUGen'"; \
+	  exit 1; }
+	@grep -qE '^$(VPLUGIN) *: *MultiOutUGen' $(VPLUGIN).sc.in || { \
+	  echo "install: FAIL  $(VPLUGIN).sc.in does not declare '$(VPLUGIN) : MultiOutUGen'"; \
+	  exit 1; }
 	mkdir -p $(EXTDIR)
 	cp $(PLUGIN).so $(EXTDIR)/
 	cp $(PLUGIN).sc.in $(EXTDIR)/$(PLUGIN).sc
+	cp $(NPLUGIN).so $(EXTDIR)/
+	cp $(NPLUGIN).sc.in $(EXTDIR)/$(NPLUGIN).sc
+	cp $(VPLUGIN).so $(EXTDIR)/
+	cp $(VPLUGIN).sc.in $(EXTDIR)/$(VPLUGIN).sc
 	@a=$$(wc -c < $(PLUGIN).sc.in); b=$$(wc -c < $(EXTDIR)/$(PLUGIN).sc); \
 	 if [ "$$a" != "$$b" ]; then \
 	   echo "install: FAIL  copied class file is $$b bytes, source is $$a"; \
@@ -192,12 +240,12 @@ install: $(PLUGIN).so
 	@# failed" must leave the machine bootable, not armed.
 	@if ! $(MAKE) --no-print-directory verify; then \
 	  echo; \
-	  echo "install: rolling back - removing $(EXTDIR)/$(PLUGIN).so"; \
-	  rm -f $(EXTDIR)/$(PLUGIN).so; \
+	  echo "install: rolling back - removing the plugins"; \
+	  rm -f $(EXTDIR)/$(PLUGIN).so $(EXTDIR)/$(NPLUGIN).so $(EXTDIR)/$(VPLUGIN).so; \
 	  echo "install: FAILED, but the norns will still boot."; \
 	  exit 1; \
 	fi
-	@# Mark this as a source build, so dirac.lua's first-run installer leaves it
+	@# Mark this as a source build, so the script's first-run installer leaves it
 	@# alone instead of replacing it with the prebuilt plugin.
 	@echo "source build $$(date -u +%Y-%m-%dT%H:%MZ) on $$(uname -m)" > $(EXTDIR)/BUILD
 	@echo
@@ -207,4 +255,4 @@ install: $(PLUGIN).so
 	@echo "if Dirac.ar is 'not understood' afterwards, check there first."
 
 clean:
-	rm -f $(PLUGIN).so
+	rm -f $(PLUGIN).so $(NPLUGIN).so $(VPLUGIN).so

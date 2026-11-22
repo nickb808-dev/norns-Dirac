@@ -2,7 +2,7 @@
 
 **Dirac**, the granular processor from the ER-301, on monome norns.
 
-**v0.9.0 beta.** For norns and norns shield (32-bit norns images, which is all
+**v0.13.0 beta.** For norns and norns shield (32-bit norns images, which is all
 of them today). Developed on a norns shield with a Raspberry Pi 4B.
 
 ---
@@ -20,31 +20,134 @@ of them today). Developed on a norns shield with a Raspberry Pi 4B.
 2. Load **norns-dirac** from SELECT. The first time, it installs its SuperCollider
    plugin and shows **"engine installed. SYSTEM > RESTART"**.
 3. Do **SYSTEM > RESTART**, then load **norns-dirac** again. You'll see the title
-   screen, then the grain field.
+   screen, then the loop (the first unit in the chain).
 
 An update that changes the engine shows the same screen once, and needs one
 more restart. Updates that don't change the engine load straight away.
 
 ### Playing it
 
-Plug a source into the norns input. The top of the screen is the **field**:
-the live buffer as a waveform, with "now" at the right edge, and each grain as
-a bright bar where it is reading, raised or lowered by its pitch.
+Plug a source into the norns input. It runs through a **chain of five
+units**, in whatever order you like:
+
+- **loop**: Noether, a stereo looper from the ER-301. With no loop it passes
+  the input untouched.
+- **dirac**: the ER-301 granular processor.
+- **filter**: Varia, the ER-301 variable-bandwidth filter, made multimode.
+  *type* sweeps continuously from lowpass through Varia's band to highpass;
+  *width* is the band's width, *res* peaks the edges (self-oscillating at
+  the top), *peaks* adds Varia's extra resonant peaks inside the band, and
+  *phase* swings them across the stereo field. *drive* pushes the signal
+  into a soft saturator before the filter, for resonance with grit. The
+  display is its live response curve.
+- **delay**: stereo, from twin echoes to ping-pong (*spread*).
+- **verb**: a reverb (JPverb). It uses no CPU while its mix is 0.
+
+The default chain is loop → dirac → filter → delay → verb, with the filter,
+delay and reverb off (mix 0), so it sounds as it always has until you turn
+them up.
+
+**Hold K1 to see the chain.** E1 picks a slot, E2 or E3 carries its unit
+left or right; release K1 to apply. Changes crossfade, and every unit keeps
+what it was doing as it moves (a loop keeps playing). To take a unit out of
+the sound, turn its mix down. The order is saved with PSETs.
+
+**Macros.** Past the last unit in the chain view (E1 all the way right) is
+**mc**, the macro page: four knobs, M1 to M4, each moving several
+parameters at once, each between its own two settings. M1 (*darker*: filter
+in and down, reverb damped) and M2 (*space*: reverb and delay in, wider)
+come filled; M3 and M4 are empty.
+
+To make your own: on the macro page, pick a macro (E1 / E2 / E3 select it,
+underlined) and press **K3**. *learn M3* shows on every page. Now go to any
+unit and turn the parameters you want the macro to move, from where they
+are to where the macro's far end should be. Press **K3** again to finish.
+Where each parameter started is the macro at 0, where you left it is the
+macro at 1. Learning a macro again replaces what it moves; a parameter
+turned and put back where it was is dropped. Macros save with PSETs.
+
+**Every page shows four parameters**, in two rows. The bright row is the one
+E2 and E3 turn; **E1 steps the bright row** (top, bottom, then on to the
+unit's next page). Labels are short; the full name of whatever you turn
+shows on the page line for a moment. The page line also shows the chain,
+with the slot you're on bright.
+
+**The loop pages** (`loop`, `dub`) show the **reel**: the loop as a ring whose
+thickness is its loudness, 12 o'clock the seam, clockwise forward. The head is
+a dot with a tail that grows the further speed is from 1x, and turns into a
+small hollow ring on 1/4, 1/2, 1 or 2x (or 0, or any of them reversed).
+Recording winds the ring on from 12 o'clock.
+
+| control | on the loop pages |
+|---|---|
+| K3 | rec: empty → record → close and play → overdub in → overdub out |
+| K2 tap | stop the loop on/off (it fades out and holds its place) |
+| K1 held + K2 | undo the last overdub (again = redo) |
+
+The loop closes on the sample you pressed, phase-matched and blended so it
+wraps without a click at any speed or direction. *sos* sets how much of the
+old loop an overdub keeps; *extend* lets an overdub past the end grow the loop.
+
+**The grain pages** show the **field**: the live buffer as a waveform, with
+"now" at the right edge, and each grain as a bright bar where it is reading,
+raised or lowered by its pitch.
 
 | control | does |
 |---|---|
-| E1 | page: grain, shape, scan, pitch, heads, space, regen, out, file |
-| E2 / E3 | the two parameters on the page |
-| K1 held | the page's second pair of parameters (hold for about 1/4 s) |
-| K2 tap | hold the cloud on/off |
+| E1 | row, then page, within the slot's unit |
+| K1 held | the chain: E1 slot, E2/E3 move it, release to apply |
+| E2 / E3 | the two parameters in the bright row |
 | K2 held + E2/E3 | fine adjust |
+| K1 held + K3 | rec, from any page (the field shows *rec* / *dub* while it runs) |
+| K2 tap | hold the cloud on/off |
 | K3 | fire: spawn grains now (at density 0, the only way they spawn) |
-| K1 held + K3 | save the buffer (2.73 s) to `~/dust/audio/dirac/` |
 | K1 held + K2 | field shows stereo position instead of buffer position |
 
+| control | on the macro page |
+|---|---|
+| K3 | learn the selected macro; K3 again (on any page) to finish |
+
+**mix** (out page) blends Dirac against the looper's stereo output: turn it
+down to hear the loop itself. *save capture* on the file page saves Dirac's
+buffer (2.73 s) to `~/dust/audio/dirac/`.
+
 Dimmed parameters do nothing in the current state (for example, speed in live
-mode, or head spread with multi off). Every parameter is also in **PARAMS**,
-for MIDI mapping and PSETs.
+mode, head spread with multi off, or undo with nothing to undo). Every
+parameter is also in **PARAMS**, for MIDI mapping and PSETs.
+
+### MIDI
+
+Plug in a controller; pick it in PARAMS > *midi device* (and a channel, or
+*omni*). These CCs work with no setup. Whatever you turn shows its full
+name on the page line, so you can check a mapping by moving it.
+
+| CC | controls | | CC | controls |
+|---|---|---|---|---|
+| 16 | macro M1 | | 26 | filter res |
+| 17 | macro M2 | | 27 | filter type |
+| 18 | macro M3 | | 28 | filter drive |
+| 19 | macro M4 | | 29 | filter mix |
+| 20 | loop level | | 30 | delay time |
+| 21 | loop speed | | 31 | delay feedback |
+| 22 | dirac mix | | 85 | delay mix |
+| 23 | dirac density | | 86 | reverb mix |
+| 24 | grain length | | 87 | reverb time |
+| 25 | filter freq | | | |
+
+Buttons (a CC sent at 64 or above, as most pads and buttons do):
+
+| CC | does |
+|---|---|
+| 102 | loop rec / close / overdub |
+| 103 | loop stop on/off |
+| 104 | loop undo |
+| 105 | dirac fire |
+| 106 | dirac hold on/off |
+
+The macros are the best things to put on knobs: one CC moves a whole
+gesture. For anything else, norns' own MIDI mapping still works (PARAMS >
+MAP); avoid giving a CC both meanings.
+
 
 **Files:** on the **file** page, turn E3 on *sample* to open the browser and
 pick a file from `~/dust/audio`. Files that aren't 48 kHz are converted once

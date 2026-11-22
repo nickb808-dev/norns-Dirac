@@ -1,0 +1,31 @@
+// Noether.sc.in - SuperCollider class for the Noether UGen.
+//
+// Same rules as Dirac.sc.in (read its header): the .in extension keeps sclang
+// from compiling a second copy out of ~/dust/code, the file is ASCII only, and
+// it follows the shape of a known-good MultiOutUGen.
+//
+// ARGUMENT ORDER IS LOAD-BEARING. It must match the enum in NoetherUGen.cpp,
+// which matches the engine's own addInput() order in Noether::Noether(); the
+// last four are the wrapper's own. tools/check-ugen-names.sh compares them.
+//
+// Defaults are the ER-301 unit's own (noether/assets/Noether.lua).
+Noether : MultiOutUGen {
+
+	*ar { arg inL = 0.0, inR = 0.0,
+		rec = 0.0, dub = 0.0, stop = 0.0, undo = 0.0, clk = 0.0,
+		speed = 1.0, voct = 0.0, ext = 0.0, bars = 0.0,
+		sos = 0.5, dry = 1.0, level = 1.0,
+		syncOpt = 1, bufnum = -1, undoBuf = -1, clear = 0.0;
+
+		^this.multiNew('audio', inL, inR,
+			rec, dub, stop, undo, clk,
+			speed, voct, ext, bars,
+			sos, dry, level,
+			syncOpt, bufnum, undoBuf, clear);
+	}
+
+	init { arg ... theInputs;
+		inputs = theInputs;
+		^this.initOutputs(2, rate);
+	}
+}
