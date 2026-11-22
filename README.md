@@ -1,9 +1,73 @@
 # dirac
 
-**Dirac**, the granular processor from the ER-301, on monome norns.
+A stereo instrument for monome norns built from ER-301 units: a **looper**,
+the **Dirac** granular processor and the **Varia** filter, joined by a delay
+and a reverb, in one chain you can reorder while it plays.
 
 **v0.13.0 beta.** For norns and norns shield (32-bit norns images, which is all
 of them today). Developed on a norns shield with a Raspberry Pi 4B.
+
+## What it is
+
+Audio comes in, runs through five units in a row, and goes out. You choose
+the order: loop first and the grains chew on the loop, or put the loop last
+and record what the grains, filter and echoes make. Reordering never
+interrupts anything, so a loop keeps playing as it moves.
+
+```mermaid
+flowchart LR
+  IN([audio in]) --> L
+  subgraph CHAIN["the chain: five units, any order (hold K1)"]
+    direction LR
+    L["loop<br/>stereo looper"] --> D["dirac<br/>granular"] --> F["filter<br/>low / band / high<br/>+ drive"] --> Y["delay<br/>echo to ping-pong"] --> V["verb<br/>reverb"]
+  end
+  V --> OUT([audio out])
+
+  K["encoders and keys<br/>4 params per page"] --> P
+  M["MIDI CCs<br/>fixed map"] --> P
+  M --> X["macros M1 to M4<br/>one knob, many params"]
+  K --> X
+  X --> P
+  P[("parameters<br/>saved in PSETs")] -.-> CHAIN
+```
+
+- **loop**: Noether, the ER-301 looper. Seamless loops, overdub, undo,
+  speed and reverse, drawn as a reel.
+- **dirac**: the ER-301 granular processor, on the live input or a sample,
+  drawn as a field of grains.
+- **filter**: Varia, the ER-301 variable-bandwidth filter, swept from
+  lowpass through band to highpass, with resonance, extra peaks and drive,
+  drawn as its response curve.
+- **delay** and **verb**: a stereo delay and a reverb. Each costs nothing
+  while its mix is at 0.
+- **macros** move several parameters with one knob; you set them up by
+  turning the parameters themselves. **MIDI** works with no setup: a fixed
+  list of CCs reaches the macros and the main controls.
+
+Every unit starts out of the sound (mix 0) except the loop and the grains,
+so a fresh load sounds like a looper into Dirac.
+
+### How it runs
+
+```mermaid
+flowchart TB
+  UI["<b>Lua script</b> (norns-dirac.lua)<br/>pages, chain view, displays,<br/>macros, MIDI"]
+  ENG["<b>SuperCollider engine</b> (lib/Engine_Dirac.sc)<br/>one group per slot, private buses;<br/>reordering moves units, never restarts them"]
+  subgraph UG["C++ plugins (UGens), from the ER-301"]
+    direction LR
+    N["Noether<br/>looper engine"]
+    DR["Dirac<br/>granular engine"]
+    VA["Varia<br/>filter core"]
+  end
+  UI -- "engine commands" --> ENG
+  ENG -- "display data" --> UI
+  ENG --> UG
+```
+
+The looper and granular engines are the ER-301's own C++, copied unchanged;
+the filter keeps Varia's code and adds the low-to-high sweep. The delay and
+reverb are SuperCollider. The plugins come prebuilt and install themselves
+the first time the script runs.
 
 ---
 
@@ -189,14 +253,16 @@ the script won't replace it with the prebuilt one.
 
 ---
 
-## What this is
+## How it is built
 
-The DSP is the **canonical Dirac engine**, vendored verbatim from the ER-301
-repo — not a reimplementation. The same C++ that runs on the ER-301 and on the
-Daisy Seed (`DAISY-SEED-PORT.md`) runs here, wrapped as a
-SuperCollider UGen and driven by a Lua script.
+The Dirac and Noether engines are **vendored verbatim** from their ER-301
+repos, not reimplemented: the same C++ that runs on the ER-301 runs here,
+wrapped as SuperCollider UGens and driven by a Lua script. `make
+verify-vendor` fails on any local edit. The filter is derived from Varia and
+tested against it (bit-identical in its band setting); see
+`ENGINE-PROVENANCE.md`.
 
-That is the whole design constraint: **one engine, ported.** A SuperCollider
+That is the design constraint: **one engine, ported.** A SuperCollider
 rewrite would fork the DSP and every fix would have to be made twice.
 
 ## Phase 0 — what is done, and what proves it
