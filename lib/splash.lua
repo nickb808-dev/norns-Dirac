@@ -2,16 +2,16 @@
 --
 -- Geometric and a little retro-futurist: "DIRAC" in wide, squared letters
 -- with chamfered corners (the Eurostile / Microgramma family of 80s sci-fi
--- type), drawn as strokes, over a perspective grid floor that scrolls toward
--- the viewer and a striped wireframe sun on the horizon.
+-- type), drawn as strokes, over a wireframe landscape: a 3D mesh rolling in
+-- waves toward the viewer, fading with distance.
 --
 -- Credit: (c) 2026 nickb808.
 --
--- Shown as the script starts (~3 s); any key or encoder skips it.
+-- Shown as the script starts (5 s); any key or encoder skips it.
 
 local M = {}
 
-local DURATION = 3.0          -- seconds
+local DURATION = 5.0          -- seconds
 local t0 = nil                -- start time; nil when not showing
 
 -- ── the letters ──────────────────────────────────────────────────────────────
@@ -65,17 +65,69 @@ local LOGO_X = math.floor((128 - LOGO_W) / 2)
 -- crossbar and the R's bowl (rows 6-7), so only stems are cut.
 local ROW_LEVEL = { [0] = 15, 15, 15, 14, 14, 13, 12, 12, 0, 9, 9, 8 }
 
--- ── the scene ────────────────────────────────────────────────────────────────
-local HORIZON = 33            -- the grid's horizon line
-local VX = 64                 -- vanishing point x
-local SUN_R = 14
+-- ── the scene: a wave terrain ────────────────────────────────────────────────
+-- A mesh of points in x (across) and z (depth), each lifted by two crossed
+-- travelling waves, seen from CAM above the ground and projected onto the
+-- screen. The rows (constant z) scroll toward the viewer; brightness falls
+-- with distance, which is all the depth cue the 16 levels need.
+local CAM, CY, FOCAL = 1.15, 24, 52   -- eye height, horizon row, focal length
+local ROW_GAP, NROWS = 0.6, 16        -- depth spacing and count of rows
+local XS = {}
+for i = 0, 14 do XS[#XS + 1] = -4.2 + i * 0.6 end
 
-local stars = {}
-do
-  local s = 4242
-  for i = 1, 22 do
-    s = (s * 1103515245 + 12345) % 2147483648
-    stars[i] = { x = s % 128, y = (s // 128) % (HORIZON - 2), l = 1 + (s // 7) % 3 }
+local function height(x, z, t)
+  return 0.32 * math.sin(x * 1.4 + t * 1.1) * math.cos(z * 0.8 - t * 1.6)
+       + 0.18 * math.sin(z * 1.3 + x * 0.5 - t)
+end
+local function level_at(z) return 2 + 11 * util.clamp((9.5 - z) / 8, 0, 1) end
+
+-- Segments are bucketed by brightness and each bucket stroked once: ~14
+-- strokes a frame rather than ~450. Dim (far) buckets go first, so nearer
+-- lines are drawn over farther ones.
+local buckets = {}
+local function seg(l, x0, y0, x1, y1)
+  l = math.floor(l + 0.5)
+  if l < 1 then return end
+  local b = buckets[l]
+  if not b then b = {}; buckets[l] = b end
+  b[#b + 1] = x0; b[#b + 1] = y0; b[#b + 1] = x1; b[#b + 1] = y1
+end
+
+local function draw_terrain(t)
+  for l = 1, 15 do buckets[l] = nil end
+  local off = (t * 0.9) % ROW_GAP
+  local zs = {}
+  for k = 0, NROWS - 1 do zs[#zs + 1] = 1.1 + k * ROW_GAP - off end
+  -- projected points, row by row
+  local P = {}
+  for k, z in ipairs(zs) do
+    local zz = math.max(z, 1)
+    local row = {}
+    for i, x in ipairs(XS) do
+      local y = CAM - height(x, zz, t)
+      row[i] = { 64 + FOCAL * x / zz, CY + FOCAL * y / zz }
+    end
+    P[k] = row
+  end
+  -- across (rows) and along (columns, a little dimmer)
+  for k = 1, #zs do
+    local l = level_at(zs[k])
+    local row = P[k]
+    for i = 1, #XS - 1 do seg(l, row[i][1], row[i][2], row[i + 1][1], row[i + 1][2]) end
+  end
+  for k = 1, #zs - 1 do
+    local l = level_at((math.max(zs[k], 1) + zs[k + 1]) / 2) * 0.8
+    for i = 1, #XS do seg(l, P[k][i][1], P[k][i][2], P[k + 1][i][1], P[k + 1][i][2]) end
+  end
+  for l = 1, 15 do
+    local b = buckets[l]
+    if b then
+      screen.level(l)
+      for j = 1, #b, 4 do
+        screen.move(b[j] + 0.5, b[j + 1] + 0.5); screen.line(b[j + 2] + 0.5, b[j + 3] + 0.5)
+      end
+      screen.stroke()
+    end
   end
 end
 
@@ -95,48 +147,10 @@ function M.draw(t)
   screen.aa(0)
   screen.line_width(1)
 
-  -- stars
-  for _, s in ipairs(stars) do
-    screen.level(s.l); screen.pixel(s.x, s.y); screen.fill()
-  end
+  draw_terrain(t)
 
-  -- the sun: a half disc on the horizon cut into stripes that thicken
-  -- toward the bottom, the classic retro-futurist sunset
-  for y = HORIZON - SUN_R, HORIZON - 1 do
-    local dy = HORIZON - y
-    local band = (HORIZON - y)
-    -- stripe gaps grow as we approach the horizon
-    local gap = (band < 3) and (band % 2 == 0) or (band < 8 and band % 3 == 0) or (band < 14 and band % 5 == 0)
-    if not gap then
-      local half = math.floor(math.sqrt(math.max(0, SUN_R * SUN_R - dy * dy)))
-      screen.level((dy > 12) and 3 or 4)
-      screen.rect(VX - half, y, half * 2 + 1, 1)
-      screen.fill()
-    end
-  end
-
-  -- the floor: lines converging on the vanishing point, and cross lines that
-  -- scroll toward the viewer and spread out as they come
-  screen.level(5)
-  for i = -9, 9 do
-    screen.move(VX + i * 2 + 0.5, HORIZON + 0.5)
-    screen.line(VX + i * 22 + 0.5, 64.5)
-  end
-  screen.stroke()
-  local phase = (t * 0.9) % 1
-  for k = 0, 6 do
-    local z = (k + phase) / 7              -- 0 at the horizon, 1 at the viewer
-    local y = HORIZON + math.floor((64 - HORIZON) * z * z + 0.5)
-    if y > HORIZON and y < 64 then
-      screen.level(math.floor(2 + 6 * z))
-      screen.move(0, y + 0.5); screen.line(128, y + 0.5); screen.stroke()
-    end
-  end
-  screen.level(10)
-  screen.move(0, HORIZON + 0.5); screen.line(128, HORIZON + 0.5); screen.stroke()
-
-  -- the word: black backing first so the sun and stars do not show through
-  -- the letters' cut, then the rows, revealed top-down over the first 0.4 s
+  -- the word: black backing first so the mesh does not show through the
+  -- letters' cut, then the rows, revealed top-down over the first 0.4 s
   local reveal = math.floor(util.clamp(t / 0.4, 0, 1) * 12)
   screen.level(0)
   screen.rect(LOGO_X - 2, LOGO_Y - 2, LOGO_W + 4, 15)
@@ -159,8 +173,8 @@ function M.draw(t)
     end
   end
 
-  -- prompt and credit on black plates on the floor, so grid lines never
-  -- run through the text
+  -- prompt and credit on black plates, so mesh lines never run through the
+  -- text
   screen.font_face(1); screen.font_size(8)
   if t > 0.6 and math.floor(t * 2.5) % 2 == 0 then
     local pw = screen.text_extents("PUSH ANY KEY")
