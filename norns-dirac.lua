@@ -365,8 +365,16 @@ local CACHE = _path.audio .. "dirac/.cache/"
 
 local function shq(str) return "'" .. str:gsub("'", "'\\''") .. "'" end
 
+-- Every pick and every clear takes a new load_gen. Conversion to 48 kHz
+-- (sox) can take seconds, so a slow file picked first could otherwise
+-- arrive after a quick one picked later and replace it; a conversion that
+-- returns after a newer pick (or a clear) is ignored. The engine applies the
+-- same rule to its own reads.
+local load_gen = 0
 local function load_file(path)
   if not path or path == "" or path == "-" or path:sub(-1) == "/" then return end
+  load_gen = load_gen + 1
+  local gen = load_gen
   local name = path:match("[^/]*$")
   local out = CACHE .. name:gsub("%.[^.]*$", "") .. "-48k.wav"
   flash("reading " .. name)
@@ -375,6 +383,7 @@ local function load_file(path)
     [[elif [ -n "$r" ]; then mkdir -p %s && { [ -f %s ] || sox %s -r 48000 %s 2>/dev/null; } && printf %%s %s; fi]],
     shq(path), shq(path), shq(CACHE), shq(out), shq(path), shq(out), shq(out))
   norns.system_cmd(cmd, function(result)
+    if gen ~= load_gen then return end      -- superseded while converting
     result = (result or ""):gsub("%s+$", "")
     if result == "" then
       flash("can't read " .. name)
@@ -388,6 +397,7 @@ end
 
 local SCRIPT_ACTION = {
   unload = function()
+    load_gen = load_gen + 1                 -- a conversion in flight is void
     send("clearsample")
     params:set("source", 1)
   end,

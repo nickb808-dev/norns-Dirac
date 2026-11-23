@@ -426,12 +426,20 @@ Engine_Dirac : CroneEngine {
 	// Read a file into a NEW buffer, point dirac at it, and only then free
 	// the old one (0.25 s later: many blocks of margin). The file must already
 	// be 48 kHz (the script converts with sox).
+	//
+	// Every load and every clear takes a new loadGen. A read that finishes
+	// after a newer load or a clear is STALE: its buffer is freed unused.
+	// Without that, a clear during a long read was undone when the read
+	// finished, and the sample playing could differ from the one drawn.
 	loadSample { arg path;
 		var gen;
 		loadGen = loadGen + 1;
 		gen = loadGen;
 		Buffer.read(context.server, path, action: { arg b;
-			if (b.numFrames.isNil or: { b.numFrames < 2 }) {
+			if (gen != loadGen) {
+				("Engine_Dirac: dropped " ++ path ++ " (superseded while loading)").postln;
+				b.free;
+			} { if (b.numFrames.isNil or: { b.numFrames < 2 }) {
 				("Engine_Dirac: could not read " ++ path).postln;
 				b.free;
 				matron.sendMsg('/dirac/load_fail', path);
@@ -444,7 +452,7 @@ Engine_Dirac : CroneEngine {
 					++ b.numChannels ++ " ch)").postln;
 				matron.sendMsg('/dirac/loaded', path, b.numFrames, b.numChannels);
 				this.sendPeaks(path, gen);
-			};
+			} };
 		});
 	}
 
