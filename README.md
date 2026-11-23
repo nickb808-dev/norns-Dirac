@@ -7,6 +7,9 @@ and a reverb, in one chain you can reorder while it plays.
 **v0.13.0 beta.** For norns and norns shield (32-bit norns images, which is all
 of them today). Developed on a norns shield with a Raspberry Pi 4B.
 
+[Install](#install) · [Playing it](#playing-it) ·
+[Units and parameters](#units-and-parameters) · [MIDI](#midi)
+
 ## What it is
 
 Audio comes in, runs through five units in a row, and goes out. You choose
@@ -49,25 +52,134 @@ so a fresh load sounds like a looper into Dirac.
 
 ### How it runs
 
-```mermaid
-flowchart TB
-  UI["<b>Lua script</b> (norns-dirac.lua)<br/>pages, chain view, displays,<br/>macros, MIDI"]
-  ENG["<b>SuperCollider engine</b> (lib/Engine_Dirac.sc)<br/>one group per slot, private buses;<br/>reordering moves units, never restarts them"]
-  subgraph UG["C++ plugins (UGens), from the ER-301"]
-    direction LR
-    N["Noether<br/>looper engine"]
-    DR["Dirac<br/>granular engine"]
-    VA["Varia<br/>filter core"]
-  end
-  UI -- "engine commands" --> ENG
-  ENG -- "display data" --> UI
-  ENG --> UG
-```
-
-The looper and granular engines are the ER-301's own C++, copied unchanged;
+Three layers: a Lua script draws the pages and handles the keys, macros
+and MIDI; a SuperCollider engine runs the chain, each unit in its own slot,
+so reordering moves units without restarting them; and three C++ plugins
+do the ER-301 DSP. The looper and granular engines are the ER-301's own C++, copied unchanged;
 the filter keeps Varia's code and adds the low-to-high sweep. The delay and
 reverb are SuperCollider. The plugins come prebuilt and install themselves
 the first time the script runs.
+
+## Units and parameters
+
+Every unit's pages, in the order E1 reaches them. Each page has two rows of
+two; the screen shows the short label (in the second column), and the
+default is in brackets after each range. Every parameter is also in the norns PARAMS menu,
+under its full name.
+
+### loop: Noether, the ER-301 looper
+
+Stereo. With no loop recorded it passes the input straight through. Its
+display is the **reel**: the loop as a ring whose thickness is its loudness.
+
+| page | label | range (default) | what it does |
+|---|---|---|---|
+| loop | speed | −2 to 2 × (1) | Playback speed; pitch follows. Negative plays in reverse, 0 stops. Sticks gently at ¼, ½, 1 and 2×. |
+| loop | level | 0 to 1 (1) | The loop's level. |
+| loop | sos | 0 to 1 (0.5) | Sound-on-sound: how much of the old loop an overdub keeps. 0 replaces it, 1 keeps all of it. |
+| loop | dry | 0 to 1 (1) | The live input's level alongside the loop. |
+| dub | dub | press | Overdub in, or out if already overdubbing. |
+| dub | ext | on / off (off) | Extend: an overdub that runs past the loop's end makes the loop longer. |
+| dub | undo | press | Swap out the last overdub or extension. Again to redo. |
+| dub | clear | press | Erase the loop. |
+| (K3) | rec | press | One button for everything: record, close and play, overdub in, overdub out. |
+| (K2) | stop | on / off (off) | Fade the loop out and hold its place; again to resume. |
+
+### dirac: the ER-301 granular processor
+
+Grains read from a 2.7 s buffer of whatever reaches it (or from a loaded
+sample). Its display is the **field**: the buffer as a waveform, each grain
+a bright bar where it reads, raised or lowered by its pitch.
+
+| page | label | range (default) | what it does |
+|---|---|---|---|
+| grain | dens | 0 to 32 (3) | Density: how many grains overlap. 0 = grains only when fired (K3). |
+| grain | len | 1 ms to 1 s (50 ms) | Grain length. |
+| grain | grns | 1 to 32 (12) | The most grains allowed at once. |
+| grain | rev | 0 to 1 (0) | Chance a grain plays backwards. |
+| shape | shape | 8 shapes (normal) | Grain envelope: normal, bell, sinc, triangle, decay, ramp, tukey, square. |
+| shape | tex | 0 to 1 (0.5) | Texture. On *normal* it morphs percussive → smooth → flat-topped; on the others it is that shape's own adjustment. |
+| shape | tilt | −1 to 1 (0) | Where each grain peaks: −1 at its start, 0 in the middle, 1 at its end. |
+| shape | tscat | 0 to 1 (0) | Gives each grain its own tilt around *tilt*, so attacks and swells mix. |
+| scan | head | 0 to 1 (0) | Where grains read. Live: how far back in time (0 = now, which also sets the feedback delay). Sample: position in the file. |
+| scan | jit | 0 to 1 (0) | Random scatter of each grain's read position. |
+| scan | speed | −4 to 4 (0) | Sample only: scans through the file, independent of pitch. 1 = original tempo, negative = backwards. |
+| scan | snap | 0 to 1 (0) | Pulls grains onto the nearest transient, so drums stay hits instead of a smear. |
+| pitch | trans | −24 to 24 st (0) | Transpose, in semitones. |
+| pitch | scat | 0 to 12 st (0) | Random pitch per grain, up to this many semitones. |
+| pitch | scale | 7 options (off) | Snaps the scattered pitches to a scale: off, chromatic, major, minor, pentatonic major or minor, whole tone. |
+| pitch | v/oct | −2 to 2 (0) | Fine, continuous pitch offset, added to transpose. |
+| heads | multi | on / off (off) | Turns on up to four playheads sharing the buffer. Off bypasses them entirely. |
+| heads | heads | 1 to 4 (1) | How many playheads; grains are dealt between them. |
+| heads | hsprd | 0 to 1 (0) | How far apart the playheads read (1 = spread across the whole buffer). |
+| heads | htune | −12 to 12 st (0) | Pitch interval between playheads: 7 gives stacked fifths, and with a *scale* set it builds chords in that scale. |
+| space | sprd | 0 to 1 (0.5) | How far grains scatter across the stereo field. |
+| space | binau | 0 to 1 (0) | Binaural depth on top of the panning (best on headphones). |
+| space | dtune | 0 to 0.5 st (0) | Detunes left against right. |
+| space | diff | on / off (off) | Diffuse: smears grain edges into a halo (and the feedback with them). |
+| regen | fdbk | 0 to 1 (0) | Feeds the output back into the buffer: ~0.8 a clear tail, ~1 a held drone. |
+| regen | comp | 0 to 1 (0) | Evens out grain levels, so quiet and loud source parts sit together. |
+| regen | frz | on / off (off) | Freeze: stops recording into the buffer, so the grains keep playing a frozen moment. |
+| regen | hold | on / off (off) | Hold: freezes the cloud itself (grains loop, no new ones). Also K2. |
+| out | mix | 0 to 1 (1) | Dirac against what reaches it: 0 hears straight through it. |
+| out | level | 0 to 1 (0.7) | Dirac's output level. |
+| out | input | L+R / L / R (L+R) | Which input channel(s) Dirac hears: L or R alone suits a mono cable in one jack. |
+| out | gain | −24 to 24 dB (0) | Gain on the norns input, before the whole chain. |
+| file | src | live / sample (live) | Granulate the live input or a loaded sample. |
+| file | file | a file | Load a sample (any rate; converted to 48 kHz the first time). |
+| file | clear | press | Unload the sample and return to live. |
+| file | save | press | Save Dirac's buffer (2.7 s) to `~/dust/audio/dirac/`. |
+| (K3) | fire | press | Spawn grains now. |
+
+### filter: Varia, the ER-301 variable-bandwidth filter, made multimode
+
+Its display is its live response curve.
+
+| page | label | range (default) | what it does |
+|---|---|---|---|
+| filter | freq | 20 Hz to 20 kHz (1 kHz) | Cutoff, or the centre of the band. |
+| filter | res | 0 to 1 (0.3) | Resonance at the edges; self-oscillates at the top. |
+| filter | type | low / band / high (low) | Sweeps continuously: lowpass → band (Varia itself) → highpass. |
+| filter | width | 0 to 1 (0.5) | The band's width, up to 6 octaves. Does nothing at pure low or high. |
+| peaks | mix | 0 to 1 (0) | The filter against what reaches it. At 0 the filter is out of the sound. |
+| peaks | peaks | 0 to 1 (0) | Varia's extra resonant peaks inside the band: from 2 up to 7. Needs some *res*. |
+| peaks | phase | −1 to 1 (0) | Swings the resonant peaks across the stereo field. |
+| peaks | drive | 0 to 1 (0) | Pushes the signal into a soft saturator before the filter (up to +24 dB in). |
+
+### delay
+
+Stereo. Its display draws each echo as a tap, left above and right below.
+
+| page | label | range (default) | what it does |
+|---|---|---|---|
+| delay | time | 10 ms to 2 s (375 ms) | Delay time; changes glide like tape. |
+| delay | fdbk | 0 to 1 (0.45) | Feedback: how many repeats. Even at 1 it sustains rather than runs away. |
+| delay | sprd | 0 to 1 (0.5) | 0 = the same echo on both sides, 1 = ping-pong. |
+| delay | mix | 0 to 1 (0) | The delay against what reaches it. |
+
+### verb
+
+JPverb (FreeVerb if it is not installed). Uses no CPU while its mix is 0.
+Its display shows the decay.
+
+| page | label | range (default) | what it does |
+|---|---|---|---|
+| verb | verb | 0 to 1 (0) | The reverb's mix. |
+| verb | time | 0.1 to 60 s (2 s) | Decay time. |
+| verb | size | 0.5 to 5 (1.5) | Room size. |
+| verb | damp | 0 to 1 (0.3) | Damping: higher darkens the tail faster. |
+
+### macros
+
+Reached past the last unit in the chain view (**mc**). *Macros*, under
+Playing it, explains learning one.
+
+| page | label | range (default) | what it does |
+|---|---|---|---|
+| macro | M1 | 0 to 1 (0) | *darker*: brings the filter in and down, damps the reverb. |
+| macro | M2 | 0 to 1 (0) | *space*: brings the reverb and delay in, widens the delay. |
+| macro | M3 | 0 to 1 (0) | Empty until you learn it. |
+| macro | M4 | 0 to 1 (0) | Empty until you learn it. |
 
 ---
 
@@ -94,18 +206,8 @@ more restart. Updates that don't change the engine load straight away.
 Plug a source into the norns input. It runs through a **chain of five
 units**, in whatever order you like:
 
-- **loop**: Noether, a stereo looper from the ER-301. With no loop it passes
-  the input untouched.
-- **dirac**: the ER-301 granular processor.
-- **filter**: Varia, the ER-301 variable-bandwidth filter, made multimode.
-  *type* sweeps continuously from lowpass through Varia's band to highpass;
-  *width* is the band's width, *res* peaks the edges (self-oscillating at
-  the top), *peaks* adds Varia's extra resonant peaks inside the band, and
-  *phase* swings them across the stereo field. *drive* pushes the signal
-  into a soft saturator before the filter, for resonance with grit. The
-  display is its live response curve.
-- **delay**: stereo, from twin echoes to ping-pong (*spread*).
-- **verb**: a reverb (JPverb). It uses no CPU while its mix is 0.
+**loop**, **dirac**, **filter**, **delay** and **verb**. Every page and
+parameter is listed under [Units and parameters](#units-and-parameters).
 
 The default chain is loop → dirac → filter → delay → verb, with the filter,
 delay and reverb off (mix 0), so it sounds as it always has until you turn
@@ -166,10 +268,19 @@ raised or lowered by its pitch.
 | K2 tap | hold the cloud on/off |
 | K3 | fire: spawn grains now (at density 0, the only way they spawn) |
 | K1 held + K2 | field shows stereo position instead of buffer position |
+| K2 held + K3 | mutate (any page): see below |
 
 | control | on the macro page |
 |---|---|
 | K3 | learn the selected macro; K3 again (on any page) to finish |
+
+**Mutate: hold K2 and press K3.** Every continuous control of the unit on
+screen moves a random amount (up to a quarter of its range) from where it
+is, so pressing again wanders further. On the macro page it mutates every
+unit at once. Mixes, levels and input gain never move, and the feedback
+controls and filter resonance stop short of running away, so a mutation
+changes the sound without dropping it out or blowing it up. Save a PSET
+first if you might want to get back.
 
 **mix** (out page) blends Dirac against the looper's stereo output: turn it
 down to hear the loop itself. *save capture* on the file page saves Dirac's
