@@ -492,6 +492,35 @@ local function learn_end()
   flash("M" .. k .. ": " .. #t .. (#t == 1 and " target" or " targets"))
 end
 
+-- ── mutate (secret: K2 held + K3) ────────────────────────────────────────────
+-- Nudges every continuous control of the unit on screen by a random amount,
+-- up to a quarter of its range, from where it is: musical rather than a
+-- full random roll, and pressing again wanders further. On the macro page it
+-- mutates every unit. Mixes, levels and gains are left alone so the sound
+-- never vanishes or jumps in volume; the three feedback-like controls are
+-- capped below runaway.
+local MUTATE_SKIP = { ingain = true, llevel = true, ldry = true, mix = true, level = true,
+                      dmix = true, fmix = true, vmix = true, voct = true }
+local MUTATE_CAP = { dfdbk = 0.9, feedback = 0.8, fres = 0.9 }
+local MUTATE_AMOUNT = 0.25
+
+local mutate_seeded = false
+local function mutate(unit)
+  -- seeded on first use: Lua's generator otherwise repeats from boot
+  if not mutate_seeded then math.randomseed(math.floor(util.time() * 1000) % 2147483647); mutate_seeded = true end
+  local n = 0
+  for id, u in pairs(UNIT_OF) do
+    if (unit == "macro" or u == unit) and u ~= "macro" and KIND[id] == "control"
+       and not MUTATE_SKIP[id] then
+      local p = params:lookup_param(id)
+      p:set_raw(util.clamp(p:get_raw() + (math.random() * 2 - 1) * MUTATE_AMOUNT, 0, 1))
+      if MUTATE_CAP[id] and params:get(id) > MUTATE_CAP[id] then params:set(id, MUTATE_CAP[id]) end
+      n = n + 1
+    end
+  end
+  flash(n > 0 and ("mutated " .. (unit == "macro" and "everything" or unit)) or "nothing to mutate")
+end
+
 -- ── midi ─────────────────────────────────────────────────────────────────────
 -- A fixed CC map, so a controller works without setup (README lists it).
 -- Continuous CCs set the param across its range; button CCs act at >= 64.
@@ -813,6 +842,9 @@ function key(n, z)
       k2_down = false
     end
   elseif n == 3 and z == 1 then
+    -- the secret one: K2 held + K3 mutates the unit on screen (K2's release
+    -- then does nothing, as after a fine adjust)
+    if k2_down and not k1_held then k2_used = true; mutate(cur_unit()); return end
     -- learning a macro: K3 anywhere ends it (K1 + K3 still records)
     if learning and not k1_held then learn_end(); return end
     if cur_unit() == "macro" and not k1_held then learn_start(macro_sel); return end
